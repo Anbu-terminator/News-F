@@ -1,6 +1,6 @@
 import axios from "axios";
 import fetch from "node-fetch";
-import * as puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
 
@@ -17,8 +17,8 @@ if (!HUGGINGFACE_API_KEY) {
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 // ✅ Stable Hugging Face models
-const SUMMARIZER_MODEL = "sshleifer/distilbart-cnn-12-6"; // Extractive summarizer
-const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; // Free router chat model
+const SUMMARIZER_MODEL = "sshleifer/distilbart-cnn-12-6"; 
+const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; 
 
 // Create Hugging Face OpenAI-compatible client
 export const client = new OpenAI({
@@ -29,8 +29,14 @@ export const client = new OpenAI({
 // -------------------- HF Summarizer --------------------
 async function hfSummarize(text: string): Promise<string> {
   try {
-    const cleaned = text.replace(/\s+/g, " ").trim();
+    let cleaned = text.replace(/\s+/g, " ").trim();
     if (!cleaned) return "No text to summarize.";
+
+    // ✅ Prevent "index out of range" by truncating to ~1000 words
+    const words = cleaned.split(" ");
+    if (words.length > 1000) {
+      cleaned = words.slice(0, 1000).join(" ");
+    }
 
     const response = await fetch(
       `https://api-inference.huggingface.co/models/${SUMMARIZER_MODEL}`,
@@ -70,7 +76,7 @@ async function hfSummarize(text: string): Promise<string> {
   }
 }
 
-// -------------------- LOCAL RULE-BASED TEXT SUMMARIZER --------------------
+// -------------------- LOCAL RULE-BASED FALLBACK --------------------
 export function ruleBasedTextSummarizer(text: string): string {
   const sentences = text
     .split(/[.!?]/)
@@ -96,9 +102,16 @@ export async function summarizeText(
     }
 
     if (type === "link" && typeof input === "string") {
-      const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
+      // ✅ Use puppeteer-core + @sparticuz/chromium for serverless
+      const browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+      });
+
       const page = await browser.newPage();
-      await page.goto(input, { waitUntil: "networkidle2" });
+      await page.goto(input, { waitUntil: "domcontentloaded", timeout: 60000 });
 
       await page.evaluate(() => {
         const elements = Array.from(document.querySelectorAll("script, style, noscript, iframe"));
@@ -148,6 +161,7 @@ export async function summarizeText(
     return "Summarization failed due to internal error.";
   }
 }
+
 
 // -------------------- CHATBOT --------------------
 export async function chatWithAI(
