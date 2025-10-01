@@ -16,9 +16,9 @@ if (!HUGGINGFACE_API_KEY) {
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
-// ✅ Stable Hugging Face models
-const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; 
-const SUMMARIZER_MODEL = "facebook/bart-large-cnn"; // ✅ more stable
+// ✅ Working chat model for Hugging Face OpenRouter
+const CHAT_MODEL = "gpt-3.5-turbo"; 
+const SUMMARIZER_MODEL = "facebook/bart-large-cnn"; // ✅ stable summarizer
 
 // Create Hugging Face OpenAI-compatible client
 export const client = new OpenAI({
@@ -32,7 +32,7 @@ async function hfSummarize(text: string): Promise<string> {
     let cleaned = text.replace(/\s+/g, " ").trim();
     if (!cleaned) return "No text to summarize.";
 
-    // ✅ Split into ~500-word chunks
+    // Split into ~500-word chunks
     const words = cleaned.split(" ");
     const chunkSize = 500;
     const chunks: string[] = [];
@@ -63,8 +63,6 @@ async function hfSummarize(text: string): Promise<string> {
       }
 
       const result: any = await response.json();
-      console.log("HF Summarizer raw response:", result);
-
       if (Array.isArray(result) && result[0]?.summary_text) {
         summaries.push(result[0].summary_text);
       } else if (result?.summary_text) {
@@ -74,10 +72,8 @@ async function hfSummarize(text: string): Promise<string> {
       }
     }
 
-    // ✅ Merge summaries recursively if multiple
     if (summaries.length > 1) {
       const merged = summaries.join(" ");
-      // Avoid infinite recursion by returning directly if it's short enough
       if (merged.split(" ").length <= 500) return merged;
       return await hfSummarize(merged);
     }
@@ -150,14 +146,13 @@ export async function summarizeText(
         const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
         const response = await axios.get(url);
 
-        if (!response.data.items || response.data.items.length === 0)
-          return "Video not found or API quota exceeded.";
+        const item = response.data.items?.[0];
+        if (!item || !item.snippet) return "Video not found or description missing.";
 
-        const snippet = response.data.items[0].snippet;
-        const textContent = `Title: ${snippet.title}\nDescription: ${snippet.description}`;
+        const snippet = item.snippet;
+        const textContent = `Title: ${snippet.title || ""}\nDescription: ${snippet.description || ""}`;
         const cleanedText = textContent.replace(/\s+/g, " ").trim();
 
-        // ✅ fallback for short YouTube descriptions
         if (cleanedText.split(" ").length < 20) {
           return ruleBasedTextSummarizer(cleanedText);
         }
@@ -199,18 +194,11 @@ export async function chatWithAI(
     });
 
     const reply = completion.choices?.[0]?.message?.content;
-    if (!reply || !reply.trim()) {
-      return "AI returned an empty response.";
-    }
-
+    if (!reply || !reply.trim()) return "AI returned an empty response.";
     return reply.trim();
   } catch (err: any) {
-    if (err.status === 401) {
-      console.error("❌ Hugging Face token invalid or expired – regenerate at https://huggingface.co/settings/tokens");
-      return "Authentication failed. Please update your Hugging Face token.";
-    }
-    console.error("Error in chatWithAI:", err.response?.data || err.message);
-    return "AI model unavailable.";
+    console.error("Chat error:", err.response?.data || err.message || err);
+    return "AI chat model unavailable. Please check your Hugging Face OpenRouter API key and model.";
   }
 }
 
