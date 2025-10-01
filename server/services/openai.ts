@@ -17,7 +17,7 @@ const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 // ✅ Stable Hugging Face models
 const SUMMARIZER_MODEL = "sshleifer/distilbart-cnn-12-6"; // Extractive summarizer
-const CHAT_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1"; // Router chat model
+const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai"; // Router chat model
 
 // Create Hugging Face OpenAI-compatible client
 export const client = new OpenAI({
