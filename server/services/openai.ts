@@ -17,7 +17,7 @@ if (!HUGGINGFACE_API_KEY) {
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 // ✅ Working chat model for Hugging Face OpenRouter
-const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai"; // Removed invalid provider suffix
+const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai"; 
 const SUMMARIZER_MODEL = "facebook/bart-large-cnn";
 
 // Create Hugging Face OpenAI-compatible client
@@ -37,8 +37,11 @@ async function hfSummarize(text: string): Promise<string> {
     const chunks: string[] = [];
 
     for (let i = 0; i < words.length; i += chunkSize) {
-      chunks.push(words.slice(i, i + chunkSize).join(" "));
+      const chunkText = words.slice(i, i + chunkSize).join(" ").trim();
+      if (chunkText.length > 0) chunks.push(chunkText);
     }
+
+    if (chunks.length === 0) return "Text too short to summarize.";
 
     const summaries: string[] = [];
 
@@ -63,7 +66,6 @@ async function hfSummarize(text: string): Promise<string> {
 
       const result: any = await response.json();
 
-      // ✅ Safety check to avoid index errors
       if (Array.isArray(result) && result[0]?.summary_text) {
         summaries.push(result[0].summary_text);
       } else if (result?.summary_text) {
@@ -90,7 +92,7 @@ async function hfSummarize(text: string): Promise<string> {
   }
 }
 
-// -------------------- LOCAL RULE-BASED FALLBACK --------------------
+// -------------------- RULE-BASED FALLBACK --------------------
 export function ruleBasedTextSummarizer(text: string): string {
   const sentences = text
     .split(/[.!?]/)
@@ -141,31 +143,42 @@ export async function summarizeText(
     }
 
     if (type === "youtube" && typeof input === "string") {
+      // ✅ Extract video ID
       const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
       const videoId = videoIdMatch[1];
 
       try {
-        const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
+        // Fetch video details first
+        const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${YOUTUBE_API_KEY}`;
         const response = await axios.get(url);
-
-        // ✅ Safety check
-        if (!response.data?.items || response.data.items.length === 0) {
+        if (!response.data?.items || response.data.items.length === 0)
           return "Video not found or description missing.";
-        }
 
         const snippet = response.data.items[0]?.snippet || {};
-        const textContent = `Title: ${snippet.title || ""}\nDescription: ${snippet.description || ""}`;
-        const cleanedText = textContent.replace(/\s+/g, " ").trim();
+        let transcriptText = "";
 
-        if (cleanedText.split(" ").length < 20) {
-          return ruleBasedTextSummarizer(cleanedText);
+        // Try to fetch captions using youtube transcript API
+        try {
+          const transcriptUrl = `https://video.google.com/timedtext?lang=en&v=${videoId}`;
+          const transcriptRes = await axios.get(transcriptUrl);
+          if (transcriptRes.data) {
+            // Strip XML tags to get plain text
+            transcriptText = transcriptRes.data.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          }
+        } catch (_) {
+          transcriptText = "";
         }
 
-        return await hfSummarize(cleanedText);
+        // Fallback to title+description if transcript is empty
+        if (!transcriptText || transcriptText.split(" ").length < 20) {
+          transcriptText = `Title: ${snippet.title || ""}\nDescription: ${snippet.description || ""}`;
+        }
+
+        return await hfSummarize(transcriptText);
       } catch (err: any) {
-        console.error("YouTube Data API error:", err.message || err);
-        return "Unable to fetch video details. Please provide text manually.";
+        console.error("YouTube summarization error:", err.message || err);
+        return "Unable to fetch video transcript. Please provide text manually.";
       }
     }
 
@@ -177,10 +190,7 @@ export async function summarizeText(
 }
 
 // -------------------- CHATBOT --------------------
-export async function chatWithAI(
-  message: string,
-  context?: string
-): Promise<string> {
+export async function chatWithAI(message: string, context?: string): Promise<string> {
   try {
     const completion = await client.chat.completions.create({
       model: CHAT_MODEL,
@@ -198,8 +208,7 @@ export async function chatWithAI(
       max_tokens: 500,
     });
 
-    const reply = completion.choices?.[0]?.message?.content;
-    return reply?.trim() || "AI returned an empty response.";
+    return completion.choices?.[0]?.message?.content?.trim() || "AI returned an empty response.";
   } catch (err: any) {
     console.error("Chat error:", err.response?.data || err.message || err);
     return "AI chat model unavailable. Check your Hugging Face OpenRouter API key and model.";
@@ -207,34 +216,21 @@ export async function chatWithAI(
 }
 
 // -------------------- FAKE NEWS DETECTION --------------------
-export async function detectFakeNews(text: string): Promise<{
-  isReal: boolean;
-  confidence: number;
-  reasoning: string;
-}> {
-  const trustedSources = [
-    "the hindu","times of india","indian express","hindustan times","ndtv",
-    "business standard","mint","economic times","deccan herald","the telegraph india",
-    "dna india","outlook india","livemint","news18","pti","dina thanthi","dinamalar",
-    "dinakaran","maalaimalar","puthiya thalaimurai","polimer news","sun tv","vikatan",
-    "ananda vikatan","malayala manorama","mathrubhumi","eenadu","sakshi","lokmat",
-    "gujarat samachar","rajasthan patrika","punjab kesari","bbc","reuters","ap news",
-    "associated press","the guardian","cnn","new york times","washington post",
-    "the economist","financial times","wall street journal","bloomberg","al jazeera",
-    "sky news","abc news","cbs news","nbc news","fox news","the times uk","the telegraph uk",
-    "nature","science magazine","scientific american","techcrunch","wired","the verge",
-    "ars technica","engadget","cnet","forbes","fortune","business insider","marketwatch",
-    "yahoo finance","cnbc","investopedia",
-  ];
+export async function detectFakeNews(text: string): Promise<{isReal:boolean,confidence:number,reasoning:string}> {
+  const trustedSources = ["the hindu","times of india","indian express","hindustan times","ndtv",
+  "business standard","mint","economic times","deccan herald","the telegraph india","dna india","outlook india","livemint","news18",
+  "pti","dina thanthi","dinamalar","dinakaran","maalaimalar","puthiya thalaimurai","polimer news","sun tv","vikatan",
+  "ananda vikatan","malayala manorama","mathrubhumi","eenadu","sakshi","lokmat","gujarat samachar","rajasthan patrika",
+  "punjab kesari","bbc","reuters","ap news","associated press","the guardian","cnn","new york times","washington post",
+  "the economist","financial times","wall street journal","bloomberg","al jazeera","sky news","abc news","cbs news",
+  "nbc news","fox news","the times uk","the telegraph uk","nature","science magazine","scientific american",
+  "techcrunch","wired","the verge","ars technica","engadget","cnet","forbes","fortune","business insider",
+  "marketwatch","yahoo finance","cnbc","investopedia"];
 
   const lowerText = text.toLowerCase();
-  for (const src of trustedSources) {
-    if (lowerText.includes(src)) {
-      return {
-        isReal: true,
-        confidence: 0.95,
-        reasoning: `Trusted source: ${src}`,
-      };
+  for(const src of trustedSources){
+    if(lowerText.includes(src)){
+      return {isReal:true,confidence:0.95,reasoning:`Trusted source: ${src}`};
     }
   }
 
@@ -242,55 +238,43 @@ export async function detectFakeNews(text: string): Promise<{
 Respond in valid JSON format ONLY: { "isReal": boolean, "confidence": number, "reasoning": string }
 USER: Text to analyze: ${text}`;
 
-  try {
+  try{
     const completion = await client.chat.completions.create({
       model: CHAT_MODEL,
-      messages: [{ role: "user", content: prompt }],
+      messages:[{role:"user",content:prompt}]
     });
 
-    const raw = completion.choices?.[0]?.message?.content || "{}";
-    const jsonString = raw.replace(/```json/g, "").replace(/```/g, "").trim();
+    const raw = completion.choices?.[0]?.message?.content||"{}";
+    const jsonString = raw.replace(/```json/g,"").replace(/```/g,"").trim();
     const result = JSON.parse(jsonString);
 
     return {
-      isReal: result.isReal ?? false,
-      confidence: Math.min(Math.max(result.confidence ?? 0.5, 0), 1),
-      reasoning: result.reasoning?.slice(0, 500) ?? "Analysis unavailable",
+      isReal: result.isReal??false,
+      confidence: Math.min(Math.max(result.confidence??0.5,0),1),
+      reasoning: result.reasoning?.slice(0,500)??"Analysis unavailable"
     };
-  } catch (err: any) {
-    console.error("Fake news detection error:", err.message || err);
-    return {
-      isReal: false,
-      confidence: 0.3,
-      reasoning: "Temporarily unavailable - try again later",
-    };
+  } catch(err:any){
+    console.error("Fake news detection error:", err.message||err);
+    return {isReal:false,confidence:0.3,reasoning:"Temporarily unavailable - try again later"};
   }
 }
 
 // -------------------- YouTube helper --------------------
-export async function fetchYouTubeVideos(
-  query: string,
-  maxResults: number = 5
-): Promise<any[]> {
-  try {
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(
-      query
-    )}&maxResults=${maxResults}&key=${YOUTUBE_API_KEY}`;
-
+export async function fetchYouTubeVideos(query:string,maxResults:number=5):Promise<any[]>{
+  try{
+    const url=`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&maxResults=${maxResults}&key=${YOUTUBE_API_KEY}`;
     const response = await axios.get(url);
-
-    if (!response.data?.items || response.data.items.length === 0) return [];
-
-    return response.data.items.map((item: any) => ({
-      title: item.snippet?.title || "",
-      description: item.snippet?.description || "",
-      publishedAt: item.snippet?.publishedAt || "",
-      videoId: item.id?.videoId || "",
-      channelTitle: item.snippet?.channelTitle || "",
-      thumbnail: item.snippet?.thumbnails?.high?.url || "",
+    if(!response.data?.items || response.data.items.length===0) return [];
+    return response.data.items.map((item:any)=>({
+      title:item.snippet?.title||"",
+      description:item.snippet?.description||"",
+      publishedAt:item.snippet?.publishedAt||"",
+      videoId:item.id?.videoId||"",
+      channelTitle:item.snippet?.channelTitle||"",
+      thumbnail:item.snippet?.thumbnails?.high?.url||""
     }));
-  } catch (err: any) {
-    console.error("Error fetching YouTube videos:", err?.message || err);
+  } catch(err:any){
+    console.error("Error fetching YouTube videos:",err?.message||err);
     return [];
   }
 }
