@@ -92,32 +92,32 @@ export async function summarizeText(
       return await hfSummarize(input);
     }
 
-    if (type === "link" && typeof input === "string") {
-      const browser = await puppeteer.launch({
-        headless: "new",
-        args: ["--no-sandbox"],
-      });
-      const page = await browser.newPage();
-      await page.goto(input, { waitUntil: "networkidle2" });
+   if (type === "link" && typeof input === "string") {
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
+  });
 
-      await page.evaluate(() => {
-        document
-          .querySelectorAll("script, style, noscript, iframe")
-          .forEach((el) => el.remove());
-      });
+  const page = await browser.newPage();
+  await page.goto(input, { waitUntil: "networkidle2" });
 
-      const textContent: string = await page.evaluate(
-        () => document.body.innerText || ""
-      );
-      await browser.close();
+  await page.evaluate(() => {
+    document.querySelectorAll("script, style, noscript, iframe")
+      .forEach((el) => el.remove());
+  });
 
-      const cleanedText = textContent.replace(/\s+/g, " ").trim();
-      if (!cleanedText)
-        return "Failed to extract text. Please copy-paste article content.";
+  const textContent: string = await page.evaluate(
+    () => document.body.innerText || ""
+  );
+  await browser.close();
 
-      return await hfSummarize(cleanedText);
-    }
+  const cleanedText = textContent.replace(/\s+/g, " ").trim();
+  if (!cleanedText)
+    return "Failed to extract text. Please copy-paste article content.";
 
+  return await hfSummarize(cleanedText);
+}
     if (type === "youtube" && typeof input === "string") {
       const videoIdMatch =
         input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?]+)/);
