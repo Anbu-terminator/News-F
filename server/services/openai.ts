@@ -135,25 +135,32 @@ export async function summarizeText(
       return await hfSummarize(cleanedText);
     }
 
+    // YouTube -> use YouTube Data API title + description (robust)
     if (type === "youtube" && typeof input === "string") {
-      const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?]+)/);
+      // extract id from various youtube URL formats
+      const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?&]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
       const videoId = videoIdMatch[1];
 
       try {
         const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
-        const response = await axios.get(url);
-        const items = response.data.items;
+        const response = await axios.get(url, { timeout: 15000 });
+
+        const items = response.data?.items;
         if (!items || items.length === 0) return "Video not found.";
 
         const snippet = items[0].snippet || {};
-        let textToSummarize = `Title: ${snippet.title || ""}. Description: ${snippet.description || ""}`;
-        textToSummarize = textToSummarize.replace(/\s+/g, " ").trim();
-        if (!textToSummarize) return "No content to summarize.";
+        const title = snippet.title || "";
+        const description = snippet.description || "";
 
+        // combine safely and trim
+        let textToSummarize = `${title}. ${description}`.replace(/\s+/g, " ").trim();
+        if (!textToSummarize) return "No content to summarize from this video.";
+
+        // if description is extremely long, hfSummarize will chunk safely
         return await hfSummarize(textToSummarize);
       } catch (err: any) {
-        console.error("YouTube summarizer error:", err.message || err);
+        console.error("YouTube summarizer error:", err.response?.data || err.message || err);
         return "Unable to fetch video details. Please provide text manually.";
       }
     }
