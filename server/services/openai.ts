@@ -15,12 +15,15 @@ if (!HUGGINGFACE_API_KEY) {
 }
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
+if (!YOUTUBE_API_KEY) {
+  throw new Error(
+    "❌ YouTube API key missing. Add it to .env as YOUTUBE_API_KEY"
+  );
+}
 
-// ✅ Working chat model for Hugging Face OpenRouter
-const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai"; 
+const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai";
 const SUMMARIZER_MODEL = "facebook/bart-large-cnn";
 
-// Create Hugging Face OpenAI-compatible client
 export const client = new OpenAI({
   baseURL: "https://router.huggingface.co/v1",
   apiKey: HUGGINGFACE_API_KEY,
@@ -46,26 +49,18 @@ async function hfSummarize(text: string): Promise<string> {
     const summaries: string[] = [];
 
     for (const chunk of chunks) {
-      const response = await fetch(
+      const response = await axios.post(
         `https://api-inference.huggingface.co/models/${SUMMARIZER_MODEL}`,
+        { inputs: chunk },
         {
-          method: "POST",
           headers: {
             Authorization: `Bearer ${HUGGINGFACE_API_KEY}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ inputs: chunk }),
         }
       );
 
-      if (response.status === 401) {
-        throw new Error(
-          "❌ Hugging Face token invalid or expired – regenerate at https://huggingface.co/settings/tokens"
-        );
-      }
-
-      const result: any = await response.json();
-
+      const result = response.data;
       if (Array.isArray(result) && result[0]?.summary_text) {
         summaries.push(result[0].summary_text);
       } else if (result?.summary_text) {
@@ -86,9 +81,7 @@ async function hfSummarize(text: string): Promise<string> {
     return summaries[0] || "Summarization failed.";
   } catch (err: any) {
     console.error("HF Summarizer error:", err.message || err);
-    return err.message?.includes("Hugging Face token")
-      ? err.message
-      : "AI temporarily unavailable.";
+    return "AI temporarily unavailable.";
   }
 }
 
@@ -143,42 +136,25 @@ export async function summarizeText(
     }
 
     if (type === "youtube" && typeof input === "string") {
-      // ✅ Extract video ID
       const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
       const videoId = videoIdMatch[1];
 
       try {
-        // Fetch video details first
-        const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${YOUTUBE_API_KEY}`;
+        const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
         const response = await axios.get(url);
-        if (!response.data?.items || response.data.items.length === 0)
-          return "Video not found or description missing.";
+        const items = response.data.items;
+        if (!items || items.length === 0) return "Video not found.";
 
-        const snippet = response.data.items[0]?.snippet || {};
-        let transcriptText = "";
+        const snippet = items[0].snippet || {};
+        let textToSummarize = `Title: ${snippet.title || ""}. Description: ${snippet.description || ""}`;
+        textToSummarize = textToSummarize.replace(/\s+/g, " ").trim();
+        if (!textToSummarize) return "No content to summarize.";
 
-        // Try to fetch captions using youtube transcript API
-        try {
-          const transcriptUrl = `https://video.google.com/timedtext?lang=en&v=${videoId}`;
-          const transcriptRes = await axios.get(transcriptUrl);
-          if (transcriptRes.data) {
-            // Strip XML tags to get plain text
-            transcriptText = transcriptRes.data.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          }
-        } catch (_) {
-          transcriptText = "";
-        }
-
-        // Fallback to title+description if transcript is empty
-        if (!transcriptText || transcriptText.split(" ").length < 20) {
-          transcriptText = `Title: ${snippet.title || ""}\nDescription: ${snippet.description || ""}`;
-        }
-
-        return await hfSummarize(transcriptText);
+        return await hfSummarize(textToSummarize);
       } catch (err: any) {
-        console.error("YouTube summarization error:", err.message || err);
-        return "Unable to fetch video transcript. Please provide text manually.";
+        console.error("YouTube summarizer error:", err.message || err);
+        return "Unable to fetch video details. Please provide text manually.";
       }
     }
 
