@@ -17,6 +17,7 @@ if (!HUGGINGFACE_API_KEY) {
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 // ✅ Stable Hugging Face models
+
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; 
 
 // Create Hugging Face OpenAI-compatible client
@@ -89,6 +90,7 @@ async function hfSummarize(text: string): Promise<string> {
       : "AI temporarily unavailable.";
   }
 }
+
 
 // -------------------- LOCAL RULE-BASED FALLBACK --------------------
 export function ruleBasedTextSummarizer(text: string): string {
