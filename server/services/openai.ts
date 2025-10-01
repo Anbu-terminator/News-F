@@ -1,6 +1,6 @@
 import axios from "axios";
 import fetch from "node-fetch";
-import puppeteer from "puppeteer-core";
+import * as puppeteer from "puppeteer";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
 
@@ -16,9 +16,9 @@ if (!HUGGINGFACE_API_KEY) {
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
-// ✅ Working chat model for Hugging Face OpenRouter
-const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; 
-const SUMMARIZER_MODEL = "facebook/bart-large-cnn"; // ✅ stable summarizer
+// ✅ Stable Hugging Face models
+const SUMMARIZER_MODEL = "sshleifer/distilbart-cnn-12-6"; // Extractive summarizer
+const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; // Free router chat model
 
 // Create Hugging Face OpenAI-compatible client
 export const client = new OpenAI({
@@ -29,56 +29,39 @@ export const client = new OpenAI({
 // -------------------- HF Summarizer --------------------
 async function hfSummarize(text: string): Promise<string> {
   try {
-    let cleaned = text.replace(/\s+/g, " ").trim();
+    const cleaned = text.replace(/\s+/g, " ").trim();
     if (!cleaned) return "No text to summarize.";
 
-    // Split into ~500-word chunks
-    const words = cleaned.split(" ");
-    const chunkSize = 500;
-    const chunks: string[] = [];
+    const response = await fetch(
+      `https://api-inference.huggingface.co/models/${SUMMARIZER_MODEL}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${HUGGINGFACE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ inputs: cleaned }),
+      }
+    );
 
-    for (let i = 0; i < words.length; i += chunkSize) {
-      chunks.push(words.slice(i, i + chunkSize).join(" "));
-    }
-
-    const summaries: string[] = [];
-
-    for (const chunk of chunks) {
-      const response = await fetch(
-        `https://api-inference.huggingface.co/models/${SUMMARIZER_MODEL}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${HUGGINGFACE_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ inputs: chunk }),
-        }
+    if (response.status === 401) {
+      throw new Error(
+        "❌ Hugging Face token invalid or expired – regenerate at https://huggingface.co/settings/tokens"
       );
-
-      if (response.status === 401) {
-        throw new Error(
-          "❌ Hugging Face token invalid or expired – regenerate at https://huggingface.co/settings/tokens"
-        );
-      }
-
-      const result: any = await response.json();
-      if (Array.isArray(result) && result[0]?.summary_text) {
-        summaries.push(result[0].summary_text);
-      } else if (result?.summary_text) {
-        summaries.push(result.summary_text);
-      } else if (result?.error) {
-        summaries.push(`(Chunk summarization failed: ${result.error})`);
-      }
     }
 
-    if (summaries.length > 1) {
-      const merged = summaries.join(" ");
-      if (merged.split(" ").length <= 500) return merged;
-      return await hfSummarize(merged);
+    const result: any = await response.json();
+    console.log("HF Summarizer raw response:", result);
+
+    if (Array.isArray(result) && result[0]?.summary_text)
+      return result[0].summary_text;
+    if (result?.summary_text) return result.summary_text;
+
+    if (result?.error) {
+      return `Summarization failed: ${result.error}`;
     }
 
-    return summaries[0] || "Summarization failed.";
+    return "Summarization failed. HF API returned unexpected response.";
   } catch (err: any) {
     console.error("HF Summarizer error:", err.message || err);
     return err.message?.includes("Hugging Face token")
@@ -87,7 +70,7 @@ async function hfSummarize(text: string): Promise<string> {
   }
 }
 
-// -------------------- LOCAL RULE-BASED FALLBACK --------------------
+// -------------------- LOCAL RULE-BASED TEXT SUMMARIZER --------------------
 export function ruleBasedTextSummarizer(text: string): string {
   const sentences = text
     .split(/[.!?]/)
@@ -113,15 +96,9 @@ export async function summarizeText(
     }
 
     if (type === "link" && typeof input === "string") {
-      const browser = await puppeteer.launch({
-        args: chromium.args,
-        defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(),
-        headless: chromium.headless,
-      });
-
+      const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
       const page = await browser.newPage();
-      await page.goto(input, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.goto(input, { waitUntil: "networkidle2" });
 
       await page.evaluate(() => {
         const elements = Array.from(document.querySelectorAll("script, style, noscript, iframe"));
@@ -146,14 +123,15 @@ export async function summarizeText(
         const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
         const response = await axios.get(url);
 
-        const item = response.data.items?.[0];
-        if (!item || !item.snippet) return "Video not found or description missing.";
+        if (!response.data.items || response.data.items.length === 0)
+          return "Video not found or API quota exceeded.";
 
-        const snippet = item.snippet;
-        const textContent = `Title: ${snippet.title || ""}\nDescription: ${snippet.description || ""}`;
+        const snippet = response.data.items[0].snippet;
+        const textContent = `Title: ${snippet.title}\nDescription: ${snippet.description}`;
+
         const cleanedText = textContent.replace(/\s+/g, " ").trim();
 
-        if (cleanedText.split(" ").length < 20) {
+        if (cleanedText.split(" ").length < 10) {
           return ruleBasedTextSummarizer(cleanedText);
         }
 
@@ -192,6 +170,8 @@ export async function chatWithAI(
       temperature: 0.3,
       max_tokens: 500,
     });
+
+    console.log("HF Chat raw response:", completion);
 
     const reply = completion.choices?.[0]?.message?.content;
     if (!reply || !reply.trim()) {
@@ -284,6 +264,7 @@ export async function detectFakeNews(text: string): Promise<{
     "cnbc",
     "investopedia",
   ];
+
   const lowerText = text.toLowerCase();
   for (const src of trustedSources) {
     if (lowerText.includes(src)) {
@@ -315,6 +296,9 @@ USER: Text to analyze: ${text}`;
       reasoning: result.reasoning?.slice(0, 500) ?? "Analysis unavailable",
     };
   } catch (err: any) {
+    if (err.status === 401) {
+      console.error("❌ Hugging Face token invalid or expired – regenerate at https://huggingface.co/settings/tokens");
+    }
     console.error("Fake news detection error:", err.message || err);
     return {
       isReal: false,
