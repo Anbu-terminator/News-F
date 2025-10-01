@@ -17,7 +17,7 @@ if (!HUGGINGFACE_API_KEY) {
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 // ✅ Working chat model for Hugging Face OpenRouter
-const CHAT_MODEL = "gpt-3.5-turbo"; 
+const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; 
 const SUMMARIZER_MODEL = "facebook/bart-large-cnn"; // ✅ stable summarizer
 
 // Create Hugging Face OpenAI-compatible client
@@ -194,11 +194,18 @@ export async function chatWithAI(
     });
 
     const reply = completion.choices?.[0]?.message?.content;
-    if (!reply || !reply.trim()) return "AI returned an empty response.";
+    if (!reply || !reply.trim()) {
+      return "AI returned an empty response.";
+    }
+
     return reply.trim();
   } catch (err: any) {
-    console.error("Chat error:", err.response?.data || err.message || err);
-    return "AI chat model unavailable. Please check your Hugging Face OpenRouter API key and model.";
+    if (err.status === 401) {
+      console.error("❌ Hugging Face token invalid or expired – regenerate at https://huggingface.co/settings/tokens");
+      return "Authentication failed. Please update your Hugging Face token.";
+    }
+    console.error("Error in chatWithAI:", err.response?.data || err.message);
+    return "AI model unavailable.";
   }
 }
 
