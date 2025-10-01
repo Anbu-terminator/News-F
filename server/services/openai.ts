@@ -17,7 +17,7 @@ if (!HUGGINGFACE_API_KEY) {
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 // ✅ Stable Hugging Face models
-const SUMMARIZER_MODEL = "sshleifer/distilbart-cnn-12-6"; 
+const SUMMARIZER_MODEL = "facebook/bart-large-cnn"; 
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; 
 
 // Create Hugging Face OpenAI-compatible client
