@@ -17,7 +17,6 @@ if (!HUGGINGFACE_API_KEY) {
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 // ✅ Stable Hugging Face models
-const SUMMARIZER_MODEL = "facebook/bart-large-cnn"; 
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:free"; 
 
 // Create Hugging Face OpenAI-compatible client
@@ -27,47 +26,62 @@ export const client = new OpenAI({
 });
 
 // -------------------- HF Summarizer --------------------
+const SUMMARIZER_MODEL = "facebook/bart-large-cnn"; // ✅ more stable
+
 async function hfSummarize(text: string): Promise<string> {
   try {
     let cleaned = text.replace(/\s+/g, " ").trim();
     if (!cleaned) return "No text to summarize.";
 
-    // ✅ Prevent "index out of range" by truncating to ~1000 words
+    // ✅ Split into chunks of ~500 words to prevent index errors
     const words = cleaned.split(" ");
-    if (words.length > 1000) {
-      cleaned = words.slice(0, 1000).join(" ");
+    const chunkSize = 500;
+    const chunks: string[] = [];
+
+    for (let i = 0; i < words.length; i += chunkSize) {
+      chunks.push(words.slice(i, i + chunkSize).join(" "));
     }
 
-    const response = await fetch(
-      `https://api-inference.huggingface.co/models/${SUMMARIZER_MODEL}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${HUGGINGFACE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ inputs: cleaned }),
-      }
-    );
+    let summaries: string[] = [];
 
-    if (response.status === 401) {
-      throw new Error(
-        "❌ Hugging Face token invalid or expired – regenerate at https://huggingface.co/settings/tokens"
+    for (const chunk of chunks) {
+      const response = await fetch(
+        `https://api-inference.huggingface.co/models/${SUMMARIZER_MODEL}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${HUGGINGFACE_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ inputs: chunk }),
+        }
       );
+
+      if (response.status === 401) {
+        throw new Error(
+          "❌ Hugging Face token invalid or expired – regenerate at https://huggingface.co/settings/tokens"
+        );
+      }
+
+      const result: any = await response.json();
+      console.log("HF Summarizer raw response:", result);
+
+      if (Array.isArray(result) && result[0]?.summary_text) {
+        summaries.push(result[0].summary_text);
+      } else if (result?.summary_text) {
+        summaries.push(result.summary_text);
+      } else if (result?.error) {
+        summaries.push(`(Chunk summarization failed: ${result.error})`);
+      }
     }
 
-    const result: any = await response.json();
-    console.log("HF Summarizer raw response:", result);
-
-    if (Array.isArray(result) && result[0]?.summary_text)
-      return result[0].summary_text;
-    if (result?.summary_text) return result.summary_text;
-
-    if (result?.error) {
-      return `Summarization failed: ${result.error}`;
+    // ✅ If multiple chunks → summarize again into one short summary
+    if (summaries.length > 1) {
+      const merged = summaries.join(" ");
+      return await hfSummarize(merged); // recursive summarization
     }
 
-    return "Summarization failed. HF API returned unexpected response.";
+    return summaries[0] || "Summarization failed.";
   } catch (err: any) {
     console.error("HF Summarizer error:", err.message || err);
     return err.message?.includes("Hugging Face token")
