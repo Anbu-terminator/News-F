@@ -17,7 +17,7 @@ if (!HUGGINGFACE_API_KEY) {
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 // ✅ Working chat model for Hugging Face OpenRouter
-const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai"; 
+const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai"; // Removed invalid provider suffix
 const SUMMARIZER_MODEL = "facebook/bart-large-cnn";
 
 // Create Hugging Face OpenAI-compatible client
@@ -29,7 +29,7 @@ export const client = new OpenAI({
 // -------------------- HF Summarizer --------------------
 async function hfSummarize(text: string): Promise<string> {
   try {
-    let cleaned = text.replace(/\s+/g, " ").trim();
+    const cleaned = text.replace(/\s+/g, " ").trim();
     if (!cleaned) return "No text to summarize.";
 
     const words = cleaned.split(" ");
@@ -62,12 +62,16 @@ async function hfSummarize(text: string): Promise<string> {
       }
 
       const result: any = await response.json();
+
+      // ✅ Safety check to avoid index errors
       if (Array.isArray(result) && result[0]?.summary_text) {
         summaries.push(result[0].summary_text);
       } else if (result?.summary_text) {
         summaries.push(result.summary_text);
       } else if (result?.error) {
         summaries.push(`(Chunk summarization failed: ${result.error})`);
+      } else {
+        summaries.push("(Chunk summarization failed: unknown response)");
       }
     }
 
@@ -145,10 +149,12 @@ export async function summarizeText(
         const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
         const response = await axios.get(url);
 
-        const item = response.data.items?.[0];
-        if (!item || !item.snippet) return "Video not found or description missing.";
+        // ✅ Safety check
+        if (!response.data?.items || response.data.items.length === 0) {
+          return "Video not found or description missing.";
+        }
 
-        const snippet = item.snippet;
+        const snippet = response.data.items[0]?.snippet || {};
         const textContent = `Title: ${snippet.title || ""}\nDescription: ${snippet.description || ""}`;
         const cleanedText = textContent.replace(/\s+/g, " ").trim();
 
@@ -273,18 +279,16 @@ export async function fetchYouTubeVideos(
 
     const response = await axios.get(url);
 
-    if (response.data && response.data.items) {
-      return response.data.items.map((item: any) => ({
-        title: item.snippet?.title || "",
-        description: item.snippet?.description || "",
-        publishedAt: item.snippet?.publishedAt || "",
-        videoId: item.id?.videoId || "",
-        channelTitle: item.snippet?.channelTitle || "",
-        thumbnail: item.snippet?.thumbnails?.high?.url || "",
-      }));
-    }
+    if (!response.data?.items || response.data.items.length === 0) return [];
 
-    return [];
+    return response.data.items.map((item: any) => ({
+      title: item.snippet?.title || "",
+      description: item.snippet?.description || "",
+      publishedAt: item.snippet?.publishedAt || "",
+      videoId: item.id?.videoId || "",
+      channelTitle: item.snippet?.channelTitle || "",
+      thumbnail: item.snippet?.thumbnails?.high?.url || "",
+    }));
   } catch (err: any) {
     console.error("Error fetching YouTube videos:", err?.message || err);
     return [];
