@@ -1,6 +1,7 @@
 import axios from "axios";
 import fetch from "node-fetch";
 import * as puppeteer from "puppeteer";
+import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
 
 // -------------------- CONFIG --------------------
