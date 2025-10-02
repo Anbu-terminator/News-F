@@ -125,7 +125,7 @@ export default function Summarizer() {
               <TabsTrigger value="text"><FileText className="w-4 h-4 mr-2" />Text</TabsTrigger>
              <TabsTrigger value="text"><FileText className="w-4 h-4 mr-2" />PDF Text</TabsTrigger>
               <TabsTrigger value="url"><Link className="w-4 h-4 mr-2" />URL</TabsTrigger>
-              <TabsTrigger value="youtube"><Youtube className="w-4 h-4 mr-2" />YouTube</TabsTrigger>
+               <TabsTrigger value="url"><Link className="w-4 h-4 mr-2" />You Tube URL</TabsTrigger>
             </TabsList>
 
             <div className="mt-6">
