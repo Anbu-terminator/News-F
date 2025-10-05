@@ -1,4 +1,5 @@
-import { useState, ChangeEvent } from "react";
+import { useState, ChangeEvent, DragEvent } from "react";
+import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
 import { Button } from "@/components/ui/button";
@@ -8,14 +9,16 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { FileText, Link, Upload, Youtube, Loader2 } from "lucide-react";
+import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
   const [summary, setSummary] = useState("");
-  const [errorMsg, setErrorMsg] = useState(""); // NEW: store error messages
+  const [errorMsg, setErrorMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"text" | "url" | "pdf" | "youtube">("text");
+  const [isDragging, setIsDragging] = useState(false);
+  const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
   const parseApiResult = async (res: any) => {
@@ -92,20 +95,45 @@ export default function Summarizer() {
     setInputText("");
     setSummary("");
     setErrorMsg("");
+    setPdfUploaded(false);
   };
 
+  // 🔹 New: Handle PDF upload + drag-drop animation
   const handlePdfUpload = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e: ProgressEvent<FileReader>) => {
       const text = e.target?.result;
       if (typeof text === "string") {
         setInputText(text);
+        setPdfUploaded(true);
         toast({ title: "PDF loaded", description: "PDF content copied to text area" });
       } else {
         toast({ title: "Error", description: "Failed to read PDF content", variant: "destructive" });
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleDrag = (e: DragEvent<HTMLDivElement>, entering: boolean) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(entering);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type === "application/pdf") {
+      handlePdfUpload(file);
+    } else {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload a valid PDF file.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -120,12 +148,12 @@ export default function Summarizer() {
         </div>
 
         <Card className="p-6">
-          <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as "text" | "url" | "pdf" | "youtube")}>
+          <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as any)}>
             <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="text"><FileText className="w-4 h-4 mr-2" />Text</TabsTrigger>
-             <TabsTrigger value="text"><FileText className="w-4 h-4 mr-2" />PDF Text</TabsTrigger>
+              <TabsTrigger value="pdf"><Upload className="w-4 h-4 mr-2" />PDF</TabsTrigger>
               <TabsTrigger value="url"><Link className="w-4 h-4 mr-2" />URL</TabsTrigger>
-               <TabsTrigger value="url"><Link className="w-4 h-4 mr-2" />You Tube URL</TabsTrigger>
+              <TabsTrigger value="youtube"><Youtube className="w-4 h-4 mr-2" />YouTube</TabsTrigger>
             </TabsList>
 
             <div className="mt-6">
@@ -140,20 +168,49 @@ export default function Summarizer() {
                 />
               </TabsContent>
 
+              {/* 🔹 PDF Upload with Animation */}
               <TabsContent value="pdf" className="space-y-4">
-                <div className="border-2 border-dashed border-border rounded-lg p-12 text-center">
-                  <Upload className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-                  <h3 className="text-lg font-semibold mb-2">Upload PDF</h3>
+                <motion.div
+                  onDragEnter={(e) => handleDrag(e, true)}
+                  onDragOver={(e) => handleDrag(e, true)}
+                  onDragLeave={(e) => handleDrag(e, false)}
+                  onDrop={handleDrop}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.4 }}
+                  className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 ${
+                    isDragging
+                      ? "border-primary bg-primary/10 scale-105"
+                      : pdfUploaded
+                      ? "border-green-500 bg-green-50"
+                      : "border-border hover:border-primary/70 hover:bg-muted/50"
+                  }`}
+                  onClick={() => document.getElementById("pdf-upload-input")?.click()}
+                >
+                  <motion.div
+                    animate={isDragging ? { rotate: [0, 10, -10, 0] } : {}}
+                    transition={{ repeat: isDragging ? Infinity : 0, duration: 1 }}
+                  >
+                    {pdfUploaded ? (
+                      <CheckCircle className="w-16 h-16 mx-auto mb-4 text-green-500" />
+                    ) : (
+                      <Upload className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                    )}
+                  </motion.div>
+                  <h3 className="text-lg font-semibold mb-2">
+                    {pdfUploaded ? "PDF Uploaded Successfully!" : "Drag & Drop or Click to Upload PDF"}
+                  </h3>
+                  <p className="text-muted-foreground mt-2">
+                    We’ll extract the text automatically and prepare it for summarization.
+                  </p>
                   <input
+                    id="pdf-upload-input"
                     type="file"
                     accept="application/pdf"
                     onChange={(e) => e.target.files && handlePdfUpload(e.target.files[0])}
-                    className="mt-4"
+                    className="hidden"
                   />
-                  <p className="text-muted-foreground mt-2">
-                    PDF text will be extracted and placed in the Text tab for summarization.
-                  </p>
-                </div>
+                </motion.div>
               </TabsContent>
 
               <TabsContent value="url" className="space-y-4">
