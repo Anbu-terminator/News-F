@@ -1,34 +1,26 @@
+import fs from "fs";
+import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 import axios from "axios";
 import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import pdf from 'pdf-parse';
- // ✅ Added for reading PDFs
 
 // -------------------- CONFIG --------------------
-const HUGGINGFACE_API_KEY =
-  process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
-
-if (!HUGGINGFACE_API_KEY) {
-  throw new Error(
-    "❌ Hugging Face API key missing. Add it to .env as HUGGINGFACE_API_KEY or HF_TOKEN"
-  );
-}
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
+if (!HUGGINGFACE_API_KEY)
+  throw new Error("❌ Hugging Face API key missing. Add it to .env");
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
-if (!YOUTUBE_API_KEY) {
-  throw new Error(
-    "❌ YouTube API key missing. Add it to .env as YOUTUBE_API_KEY"
-  );
-}
+if (!YOUTUBE_API_KEY)
+  throw new Error("❌ YouTube API key missing. Add it to .env");
 
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai";
 const SUMMARIZER_MODEL = "facebook/bart-large-cnn";
 
 export const client = new OpenAI({
   baseURL: "https://router.huggingface.co/v1",
-  apiKey: HUGGINGFACE_API_KEY,
+  apiKey: HUGGINGFACE_API_KEY
 });
 
 // -------------------- HF Summarizer --------------------
@@ -63,15 +55,10 @@ async function hfSummarize(text: string): Promise<string> {
       );
 
       const result = response.data;
-      if (Array.isArray(result) && result[0]?.summary_text) {
-        summaries.push(result[0].summary_text);
-      } else if (result?.summary_text) {
-        summaries.push(result.summary_text);
-      } else if (result?.error) {
-        summaries.push(`(Chunk summarization failed: ${result.error})`);
-      } else {
-        summaries.push("(Chunk summarization failed: unknown response)");
-      }
+      if (Array.isArray(result) && result[0]?.summary_text) summaries.push(result[0].summary_text);
+      else if (result?.summary_text) summaries.push(result.summary_text);
+      else if (result?.error) summaries.push(`(Chunk summarization failed: ${result.error})`);
+      else summaries.push("(Chunk summarization failed: unknown response)");
     }
 
     if (summaries.length > 1) {
@@ -89,10 +76,7 @@ async function hfSummarize(text: string): Promise<string> {
 
 // -------------------- RULE-BASED LOCAL SUMMARIZER --------------------
 export function ruleBasedTextSummarizer(text: string): string {
-  const sentences = text
-    .split(/[.!?]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const sentences = text.split(/[.!?]/).map((s) => s.trim()).filter(Boolean);
   if (sentences.length <= 3) return text;
   const summaryCount = Math.min(4, sentences.length);
   const summaryIndices = [
@@ -104,14 +88,18 @@ export function ruleBasedTextSummarizer(text: string): string {
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- PDF READER (Local) --------------------
+// -------------------- PDF READER (Local) USING PDFJS --------------------
 export async function readPdfContent(pdfBuffer: Buffer): Promise<string> {
   try {
-    const data = await pdf(pdfBuffer);
-    const text = data.text.replace(/\s+/g, " ").trim();
-    return text.length > 0
-      ? text
-      : "No readable text found in PDF. Try another file.";
+    const data = new Uint8Array(pdfBuffer);
+    const pdf = await pdfjsLib.getDocument(data).promise;
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map((item: any) => item.str).join(" ") + " ";
+    }
+    return text.replace(/\s+/g, " ").trim() || "No readable text found in PDF. Try another file.";
   } catch (err: any) {
     console.error("PDF read error:", err.message || err);
     return "Failed to read PDF file.";
@@ -124,25 +112,15 @@ export async function summarizeText(
   type: "text" | "link" | "youtube" | "pdf" = "text"
 ): Promise<string> {
   try {
-    // ---------- TEXT ----------
-    if (type === "text" && typeof input === "string") {
-      return await hfSummarize(input);
-    }
+    if (type === "text" && typeof input === "string") return await hfSummarize(input);
 
-    // ---------- PDF ----------
     if (type === "pdf" && Buffer.isBuffer(input)) {
       console.log("📄 Summarizing PDF locally...");
       const pdfText = await readPdfContent(input);
-      if (pdfText.startsWith("Failed") || pdfText.startsWith("No readable")) {
-        return pdfText;
-      }
-
-      // Use local rule-based summarizer for PDF
-      const summary = ruleBasedTextSummarizer(pdfText);
-      return summary || "No summary could be generated from PDF.";
+      if (pdfText.startsWith("Failed") || pdfText.startsWith("No readable")) return pdfText;
+      return ruleBasedTextSummarizer(pdfText);
     }
 
-    // ---------- LINK ----------
     if (type === "link" && typeof input === "string") {
       const browser = await puppeteer.launch({
         args: chromium.args,
@@ -164,11 +142,9 @@ export async function summarizeText(
 
       const cleanedText = textContent.replace(/\s+/g, " ").trim();
       if (!cleanedText) return "Failed to extract text. Please copy-paste article content.";
-
       return await hfSummarize(cleanedText);
     }
 
-    // ---------- YOUTUBE ----------
     if (type === "youtube" && typeof input === "string") {
       const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?&]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
@@ -177,17 +153,13 @@ export async function summarizeText(
       try {
         const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
         const response = await axios.get(url, { timeout: 15000 });
-
         const items = response.data?.items;
         if (!items || items.length === 0) return "Video not found.";
-
         const snippet = items[0].snippet || {};
         const title = snippet.title || "";
         const description = snippet.description || "";
-
-        let textToSummarize = `${title}. ${description}`.replace(/\s+/g, " ").trim();
+        const textToSummarize = `${title}. ${description}`.replace(/\s+/g, " ").trim();
         if (!textToSummarize) return "No content to summarize from this video.";
-
         return await hfSummarize(textToSummarize);
       } catch (err: any) {
         console.error("YouTube summarizer error:", err.response?.data || err.message || err);
@@ -208,25 +180,19 @@ export async function chatWithAI(message: string, context?: string): Promise<str
     const completion = await client.chat.completions.create({
       model: CHAT_MODEL,
       messages: [
-        {
-          role: "system",
-          content: "You are a helpful news assistant. Answer clearly and concisely.",
-        },
-        {
-          role: "user",
-          content: context ? `Context: ${context}\nUser: ${message}` : message,
-        },
+        { role: "system", content: "You are a helpful news assistant. Answer clearly and concisely." },
+        { role: "user", content: context ? `Context: ${context}\nUser: ${message}` : message },
       ],
       temperature: 0.3,
       max_tokens: 500,
     });
-
     return completion.choices?.[0]?.message?.content?.trim() || "AI returned an empty response.";
   } catch (err: any) {
     console.error("Chat error:", err.response?.data || err.message || err);
     return "AI chat model unavailable. Check your Hugging Face OpenRouter API key and model.";
   }
 }
+
 
 // -------------------- FAKE NEWS DETECTION --------------------
 export async function detectFakeNews(text: string): Promise<{isReal:boolean,confidence:number,reasoning:string}> {
