@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import pdf from "pdf-parse"; // ✅ Added for reading PDFs
+import pdf from "pdf-parse-clean";// ✅ Added for reading PDFs
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY =
