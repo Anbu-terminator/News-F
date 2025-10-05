@@ -4,6 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
+    "preinstall": "rm -rf node_modules/pdf-parse/test || rmdir /s /q node_modules\\pdf-parse\\test 2>nul || true",
     "dev": "cross-env NODE_ENV=development tsx -r dotenv/config server/index.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "node dist/index.js",
