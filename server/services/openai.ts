@@ -3,6 +3,7 @@ import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
+import pdf from "pdf-parse"; // ✅ Added for reading PDFs
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY =
@@ -85,19 +86,35 @@ async function hfSummarize(text: string): Promise<string> {
   }
 }
 
-// -------------------- RULE-BASED FALLBACK --------------------
+// -------------------- RULE-BASED LOCAL SUMMARIZER --------------------
 export function ruleBasedTextSummarizer(text: string): string {
   const sentences = text
     .split(/[.!?]/)
     .map((s) => s.trim())
     .filter(Boolean);
-  if (sentences.length <= 2) return text;
-  const summaryCount = Math.min(3, sentences.length);
-  const summaryIndices = [0, Math.floor(sentences.length / 2), sentences.length - 1].slice(
+  if (sentences.length <= 3) return text;
+  const summaryCount = Math.min(4, sentences.length);
+  const summaryIndices = [
     0,
-    summaryCount
-  );
+    Math.floor(sentences.length / 3),
+    Math.floor((2 * sentences.length) / 3),
+    sentences.length - 1,
+  ].slice(0, summaryCount);
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
+}
+
+// -------------------- PDF READER (Local) --------------------
+export async function readPdfContent(pdfBuffer: Buffer): Promise<string> {
+  try {
+    const data = await pdf(pdfBuffer);
+    const text = data.text.replace(/\s+/g, " ").trim();
+    return text.length > 0
+      ? text
+      : "No readable text found in PDF. Try another file.";
+  } catch (err: any) {
+    console.error("PDF read error:", err.message || err);
+    return "Failed to read PDF file.";
+  }
 }
 
 // -------------------- SUMMARIZER ENTRY --------------------
@@ -106,10 +123,25 @@ export async function summarizeText(
   type: "text" | "link" | "youtube" | "pdf" = "text"
 ): Promise<string> {
   try {
+    // ---------- TEXT ----------
     if (type === "text" && typeof input === "string") {
       return await hfSummarize(input);
     }
 
+    // ---------- PDF ----------
+    if (type === "pdf" && Buffer.isBuffer(input)) {
+      console.log("📄 Summarizing PDF locally...");
+      const pdfText = await readPdfContent(input);
+      if (pdfText.startsWith("Failed") || pdfText.startsWith("No readable")) {
+        return pdfText;
+      }
+
+      // Use local rule-based summarizer for PDF
+      const summary = ruleBasedTextSummarizer(pdfText);
+      return summary || "No summary could be generated from PDF.";
+    }
+
+    // ---------- LINK ----------
     if (type === "link" && typeof input === "string") {
       const browser = await puppeteer.launch({
         args: chromium.args,
@@ -135,9 +167,8 @@ export async function summarizeText(
       return await hfSummarize(cleanedText);
     }
 
-    // YouTube -> use YouTube Data API title + description (robust)
+    // ---------- YOUTUBE ----------
     if (type === "youtube" && typeof input === "string") {
-      // extract id from various youtube URL formats
       const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?&]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
       const videoId = videoIdMatch[1];
@@ -153,11 +184,9 @@ export async function summarizeText(
         const title = snippet.title || "";
         const description = snippet.description || "";
 
-        // combine safely and trim
         let textToSummarize = `${title}. ${description}`.replace(/\s+/g, " ").trim();
         if (!textToSummarize) return "No content to summarize from this video.";
 
-        // if description is extremely long, hfSummarize will chunk safely
         return await hfSummarize(textToSummarize);
       } catch (err: any) {
         console.error("YouTube summarizer error:", err.response?.data || err.message || err);
@@ -200,7 +229,7 @@ export async function chatWithAI(message: string, context?: string): Promise<str
 
 // -------------------- FAKE NEWS DETECTION --------------------
 export async function detectFakeNews(text: string): Promise<{isReal:boolean,confidence:number,reasoning:string}> {
-  const trustedSources = ["the hindu","times of india","indian express","hindustan times","ndtv",
+   const trustedSources = ["the hindu","times of india","indian express","hindustan times","ndtv",
   "business standard","mint","economic times","deccan herald","the telegraph india","dna india","outlook india","livemint","news18",
   "pti","dina thanthi","dinamalar","dinakaran","maalaimalar","puthiya thalaimurai","polimer news","sun tv","vikatan",
   "ananda vikatan","malayala manorama","mathrubhumi","eenadu","sakshi","lokmat","gujarat samachar","rajasthan patrika",
@@ -209,7 +238,6 @@ export async function detectFakeNews(text: string): Promise<{isReal:boolean,conf
   "nbc news","fox news","the times uk","the telegraph uk","nature","science magazine","scientific american",
   "techcrunch","wired","the verge","ars technica","engadget","cnet","forbes","fortune","business insider",
   "marketwatch","yahoo finance","cnbc","investopedia"];
-
   const lowerText = text.toLowerCase();
   for(const src of trustedSources){
     if(lowerText.includes(src)){
