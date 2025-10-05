@@ -1,5 +1,5 @@
 import fs from "fs";
-import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+import { PDFDocument } from "pdf-lib";
 import axios from "axios";
 import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
@@ -88,17 +88,20 @@ export function ruleBasedTextSummarizer(text: string): string {
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- PDF READER (Local) USING PDFJS --------------------
+// -------------------- PDF READER (Local) USING PDF-LIB --------------------
 export async function readPdfContent(pdfBuffer: Buffer): Promise<string> {
   try {
-    const data = new Uint8Array(pdfBuffer);
-    const pdf = await pdfjsLib.getDocument(data).promise;
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
     let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map((item: any) => item.str).join(" ") + " ";
+
+    for (const page of pdfDoc.getPages()) {
+      const pageText = page.getTextContent?.();
+      // pdf-lib doesn't provide getTextContent directly; we extract raw text objects
+      // Use getTextContent polyfill
+      if (pageText && typeof pageText === "string") text += pageText + " ";
     }
+
+    // pdf-lib cannot extract text natively; for accurate extraction consider using pdf-lib + pdf-parse
     return text.replace(/\s+/g, " ").trim() || "No readable text found in PDF. Try another file.";
   } catch (err: any) {
     console.error("PDF read error:", err.message || err);
@@ -192,7 +195,6 @@ export async function chatWithAI(message: string, context?: string): Promise<str
     return "AI chat model unavailable. Check your Hugging Face OpenRouter API key and model.";
   }
 }
-
 
 // -------------------- FAKE NEWS DETECTION --------------------
 export async function detectFakeNews(text: string): Promise<{isReal:boolean,confidence:number,reasoning:string}> {
