@@ -39,17 +39,19 @@ export async function readPdfContent(pdfInput: Buffer | string): Promise<string>
     const pdfDoc = await PDFDocument.load(buffer);
     const pages = pdfDoc.getPages();
 
-    const text = pages
-      .map((page) => {
-        try {
-          return page.getTextContent?.()?.items?.map((i: any) => i.str).join(" ") || "";
-        } catch {
-          return "";
-        }
-      })
-      .join("\n\n");
+    // Simple workaround: Extract all text objects
+    let fullText = "";
+    for (const page of pages) {
+      const contentStream = page.getContentStream?.();
+      if (contentStream) {
+        fullText += contentStream.toString() + "\n";
+      }
+    }
 
-    return text.trim() || "No readable text found in PDF.";
+    // Fallback if no text found
+    if (!fullText.trim()) return "No readable text found in PDF.";
+
+    return fullText.replace(/\s+/g, " ").trim();
   } catch (err) {
     console.error("PDF read error:", err);
     return "Failed to read PDF file.";
@@ -79,11 +81,9 @@ export async function summarizeText(
       });
       const page = await browser.newPage();
       await page.goto(input, { waitUntil: "domcontentloaded", timeout: 60000 });
-      await page.evaluate(() => Array.from(document.querySelectorAll("script, style, noscript, iframe")).forEach((el) => el.remove()));
       const textContent: string = await page.evaluate(() => document.body.innerText || "");
       await browser.close();
-      const cleanedText = textContent.replace(/\s+/g, " ").trim();
-      return cleanedText ? ruleBasedTextSummarizer(cleanedText) : "Failed to extract text from webpage.";
+      return textContent ? ruleBasedTextSummarizer(textContent) : "Failed to extract text from webpage.";
     }
 
     if (type === "youtube" && typeof input === "string") {
@@ -91,7 +91,7 @@ export async function summarizeText(
       if (!videoIdMatch) return "Invalid YouTube URL.";
       const videoId = videoIdMatch[1];
       const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
-      const response = await axios.get(url);
+      const response = await (await import("axios")).default.get(url);
       const snippet = response.data?.items?.[0]?.snippet;
       if (!snippet) return "Video not found.";
       const textToSummarize = `${snippet.title || ""}. ${snippet.description || ""}`;
