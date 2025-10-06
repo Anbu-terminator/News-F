@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -26,29 +32,32 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
       toast({
         title: "Input required",
         description: "Please enter text or URL to summarize",
-        variant: "destructive"
+        variant: "destructive",
       });
       return;
     }
 
     setLoading(true);
     try {
-      const response = await apiRequest('POST', '/api/summarize/text', {
-        text: inputText
-      }, false);
-      
+      const response = await apiRequest(
+        "POST",
+        "/api/summarize/text",
+        { text: inputText },
+        false
+      );
+
       const data = await response.json();
       setSummary(data.summary);
-      
+
       toast({
         title: "Summary generated!",
-        description: "Your content has been successfully summarized"
+        description: "Your content has been successfully summarized",
       });
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to generate summary. Please try again.",
-        variant: "destructive"
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -62,12 +71,21 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" data-testid="modal-summarizer">
+      <DialogContent
+        className="max-w-4xl max-h-[90vh] overflow-y-auto"
+        data-testid="modal-summarizer"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
             <FileText className="w-5 h-5" />
             <span>AI Article Summarizer</span>
           </DialogTitle>
+
+          {/* ✅ Added description for accessibility */}
+          <DialogDescription>
+            Paste text, enter a URL, upload a PDF, or provide a YouTube link to
+            get an instant AI-generated summary.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">
@@ -117,7 +135,8 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
                   data-testid="input-url-summarize"
                 />
                 <p className="text-sm text-muted-foreground mt-2">
-                  Note: URL content extraction is coming soon. For now, please copy and paste the article text.
+                  Note: URL content extraction is coming soon. For now, please
+                  copy and paste the article text.
                 </p>
               </div>
             </TabsContent>
@@ -125,9 +144,12 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
             <TabsContent value="pdf" className="space-y-4">
               <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
                 <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">PDF upload feature coming soon</p>
+                <p className="text-muted-foreground">
+                  PDF upload feature coming soon
+                </p>
                 <p className="text-sm text-muted-foreground">
-                  For now, please copy and paste the PDF text content in the Text tab.
+                  For now, please copy and paste the PDF text content in the Text
+                  tab.
                 </p>
               </div>
             </TabsContent>
@@ -144,7 +166,8 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
                   data-testid="input-youtube-summarize"
                 />
                 <p className="text-sm text-muted-foreground mt-2">
-                  Note: YouTube transcript extraction is coming soon. For now, please provide the video transcript text.
+                  Note: YouTube transcript extraction is coming soon. For now,
+                  please provide the video transcript text.
                 </p>
               </div>
             </TabsContent>
@@ -178,7 +201,7 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
                   Generating...
                 </>
               ) : (
-                'Generate Summary'
+                "Generate Summary"
               )}
             </Button>
           </div>
