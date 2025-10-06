@@ -4,16 +4,14 @@ import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.js"; // modern pdfjs-dist import
+import pdfjs from "pdfjs-dist/legacy/build/pdf.js"; // ✅ Works in Node ESM
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai";
 
-// Set pdfjs worker
-GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${(getDocument as any).version}/pdf.worker.min.js`;
-
+// -------------------- OPENAI CLIENT --------------------
 export const client = new OpenAI({
   baseURL: "https://router.huggingface.co/v1",
   apiKey: HUGGINGFACE_API_KEY,
@@ -44,18 +42,17 @@ export function ruleBasedTextSummarizer(text: string): string {
   }
 }
 
-// -------------------- PDF READER (USING pdfjs-dist) --------------------
+// -------------------- PDF READER --------------------
 export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
   try {
     let data: Uint8Array;
-
     if (typeof pdfInput === "string") {
       data = new Uint8Array(Buffer.from(pdfInput, "base64"));
     } else {
       data = new Uint8Array(pdfInput);
     }
 
-    const loadingTask = getDocument({ data });
+    const loadingTask = pdfjs.getDocument({ data });
     const pdf = await loadingTask.promise;
 
     let fullText = "";
@@ -79,9 +76,7 @@ export async function summarizeText(
   type: "text" | "link" | "youtube" | "pdf" = "text"
 ): Promise<string> {
   try {
-    if (type === "text" && typeof input === "string") {
-      return ruleBasedTextSummarizer(input);
-    }
+    if (type === "text" && typeof input === "string") return ruleBasedTextSummarizer(input);
 
     if (type === "pdf") {
       console.log("📄 Summarizing PDF...");
@@ -133,6 +128,7 @@ export async function summarizeText(
     return "Summarization failed due to internal error.";
   }
 }
+
 
 // -------------------- CHATBOT --------------------
 export async function chatWithAI(message: string, context?: string): Promise<string> {
