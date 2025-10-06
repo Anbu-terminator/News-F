@@ -24,7 +24,7 @@ export default function Summarizer() {
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
-  // Dynamically load PDF.js
+  // ✅ Dynamically load PDF.js when PDF tab is active
   useEffect(() => {
     if (!pdfjsLib && activeTab === "pdf") {
       import("pdfjs-dist/build/pdf").then((module) => {
