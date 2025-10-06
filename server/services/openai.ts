@@ -3,7 +3,7 @@ import axios from "axios";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
@@ -35,30 +35,45 @@ export function ruleBasedTextSummarizer(text: string): string {
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- PDF READER USING PDF-LIB --------------------
-export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
+// -------------------- PDF READER --------------------
+export async function readPdfContent(pdfBuffer: Buffer): Promise<string> {
   try {
-    const buffer = typeof pdfInput === "string" ? Buffer.from(pdfInput, "base64") : pdfInput;
-    const pdfDoc = await PDFDocument.load(buffer);
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
     const pages = pdfDoc.getPages();
 
     let fullText = "";
 
     for (const page of pages) {
-      // Extract text items from page
-      const { textItems } = await (page as any).getTextContent?.() ?? { textItems: [] };
-      if (textItems && textItems.length > 0) {
-        fullText += textItems.map((item: any) => item.str).join(" ") + "\n";
+      const textContent = await page.getTextContent?.();
+      if (textContent && textContent.items) {
+        fullText += textContent.items.map((item: any) => item.str).join(" ") + "\n";
       }
     }
 
     if (!fullText.trim()) return "No readable text found in PDF.";
-
     return fullText.replace(/\s+/g, " ").trim();
   } catch (err) {
     console.error("PDF read error:", err);
     return "Failed to read PDF file.";
   }
+}
+// -------------------- PDF GENERATOR --------------------
+export async function generatePdfFromText(text: string): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([600, 800]);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontSize = 12;
+
+  const lines = text.split("\n");
+  let y = 780;
+
+  for (const line of lines) {
+    page.drawText(line, { x: 50, y, size: fontSize, font, color: rgb(0, 0, 0) });
+    y -= fontSize + 5;
+    if (y < 50) break; // Stop if page is full
+  }
+
+  return await pdfDoc.save();
 }
 
 // -------------------- SUMMARIZER ENTRY --------------------
