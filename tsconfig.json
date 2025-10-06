@@ -9,7 +9,10 @@
     "strict": true,
     "lib": ["esnext", "dom", "dom.iterable"],
     "jsx": "preserve",
+
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,   ← ✅ ADD THIS LINE
+
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "moduleResolution": "bundler",
