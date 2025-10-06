@@ -1,15 +1,16 @@
 import fs from "fs";
 import axios from "axios";
+import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
+import pdfParse from "pdf-parse"; // ✅ install: npm i pdf-parse
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai";
 
-// Chatbot client
 export const client = new OpenAI({
   baseURL: "https://router.huggingface.co/v1",
   apiKey: HUGGINGFACE_API_KEY,
@@ -40,27 +41,24 @@ export function ruleBasedTextSummarizer(text: string): string {
   }
 }
 
-// -------------------- PDF SUMMARIZER (Server-Side) --------------------
-export async function summarizePdfBuffer(pdfBuffer: Buffer): Promise<string> {
+// -------------------- PDF READER (REAL EXTRACTION) --------------------
+export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
   try {
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf");
-    const pdf = await pdfjs.getDocument({ data: pdfBuffer }).promise;
+    let buffer: Buffer;
 
-    let fullText = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      fullText += content.items
-        .map((item: any) => item.str || "")
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim() + "\n\n";
+    if (typeof pdfInput === "string") {
+      // Decode Base64 string from frontend
+      buffer = Buffer.from(pdfInput, "base64");
+    } else {
+      buffer = pdfInput;
     }
 
-    return ruleBasedTextSummarizer(fullText);
+    const data = await pdfParse(buffer);
+    const text = data.text?.trim();
+    return text || "No readable text found in PDF.";
   } catch (err: any) {
-    console.error("PDF summarization error:", err.message || err);
-    return "Failed to summarize PDF.";
+    console.error("PDF read error:", err.message || err);
+    return "Failed to read PDF file.";
   }
 }
 
@@ -75,13 +73,9 @@ export async function summarizeText(
     }
 
     if (type === "pdf") {
-      let pdfBuffer: Buffer;
-      if (Buffer.isBuffer(input)) pdfBuffer = input;
-      else if (typeof input === "string") pdfBuffer = Buffer.from(input, "base64");
-      else throw new Error("Invalid PDF input type");
-
-      console.log("📄 Summarizing PDF locally...");
-      return summarizePdfBuffer(pdfBuffer);
+      console.log("📄 Summarizing PDF...");
+      const pdfText = await readPdfContent(input);
+      return ruleBasedTextSummarizer(pdfText);
     }
 
     if (type === "link" && typeof input === "string") {
@@ -94,7 +88,6 @@ export async function summarizeText(
 
       const page = await browser.newPage();
       await page.goto(input, { waitUntil: "domcontentloaded", timeout: 60000 });
-
       await page.evaluate(() => {
         const elements = Array.from(document.querySelectorAll("script, style, noscript, iframe"));
         elements.forEach((el) => el.remove());
@@ -104,14 +97,15 @@ export async function summarizeText(
       await browser.close();
 
       const cleanedText = textContent.replace(/\s+/g, " ").trim();
-      return cleanedText ? ruleBasedTextSummarizer(cleanedText) : "Failed to extract text from webpage.";
+      if (!cleanedText) return "Failed to extract text from webpage.";
+      return ruleBasedTextSummarizer(cleanedText);
     }
 
     if (type === "youtube" && typeof input === "string") {
       const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?&]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
-
       const videoId = videoIdMatch[1];
+
       const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
       const response = await axios.get(url);
       const items = response.data?.items;
@@ -128,6 +122,7 @@ export async function summarizeText(
     return "Summarization failed due to internal error.";
   }
 }
+
 
 // -------------------- CHATBOT --------------------
 export async function chatWithAI(message: string, context?: string): Promise<string> {
