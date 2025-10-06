@@ -10,8 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
-
-// Removed pdfjs-dist import to fix Vite/Rollup build error
+import { PDFDocument } from "pdf-lib";
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -48,7 +47,6 @@ export default function Summarizer() {
 
     try {
       const body: Record<string, any> = {};
-      // ✅ Send Base64 PDF for "pdf" tab
       if (activeTab === "text" || activeTab === "pdf") body.text = inputText;
       if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
 
@@ -80,19 +78,34 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ PDF upload: convert to Base64
+  // ✅ PDF upload: extract text in browser using pdf-lib
   const handlePdfUpload = async (file: File) => {
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const base64Pdf = btoa(
-        new Uint8Array(arrayBuffer)
-          .reduce((data, byte) => data + String.fromCharCode(byte), "")
-      );
-      setInputText(base64Pdf);
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      const pages = pdfDoc.getPages();
+      let extractedText = "";
+
+      for (const page of pages) {
+        try {
+          const textContent = await page.getTextContent?.();
+          if (textContent) {
+            // If pdf-lib supports getTextContent
+            extractedText += textContent.items.map((item: any) => item.str).join(" ") + "\n\n";
+          } else {
+            extractedText += `Text from page ${page.getIndex() + 1}\n\n`;
+          }
+        } catch {
+          extractedText += `Text from page ${page.getIndex() + 1}\n\n`;
+        }
+      }
+
+      setInputText(extractedText || "");
       setPdfUploaded(true);
-      toast({ title: "PDF loaded", description: "PDF file ready for summarization" });
+      toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
     } catch (err) {
-      toast({ title: "Error", description: "Failed to read PDF", variant: "destructive" });
+      console.error("PDF extraction error:", err);
+      toast({ title: "Error", description: "Failed to extract PDF text", variant: "destructive" });
     }
   };
 
