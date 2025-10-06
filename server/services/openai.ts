@@ -3,9 +3,9 @@ import axios from "axios";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 // -------------------- CONFIG --------------------
+const PDFCO_API_KEY = "bastoffcial@gmail.com_Q1GTZUlpOeDRke3okhHCexKqfZU0Zw27loiIOEeyhrOA6Eh0MTxKfo8NP8hl2lIr";
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai";
@@ -35,45 +35,23 @@ export function ruleBasedTextSummarizer(text: string): string {
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- PDF READER --------------------
+// -------------------- PDF READER via PDF.co API --------------------
 export async function readPdfContent(pdfBuffer: Buffer): Promise<string> {
   try {
-    const pdfDoc = await PDFDocument.load(pdfBuffer);
-    const pages = pdfDoc.getPages();
+    const base64Pdf = pdfBuffer.toString("base64");
 
-    let fullText = "";
+    const response = await axios.post(
+      "https://api.pdf.co/v1/pdf/convert/to/text",
+      { file: base64Pdf },
+      { headers: { "x-api-key": PDFCO_API_KEY } }
+    );
 
-    for (const page of pages) {
-      const textContent = await page.getTextContent?.();
-      if (textContent && textContent.items) {
-        fullText += textContent.items.map((item: any) => item.str).join(" ") + "\n";
-      }
-    }
-
-    if (!fullText.trim()) return "No readable text found in PDF.";
-    return fullText.replace(/\s+/g, " ").trim();
-  } catch (err) {
-    console.error("PDF read error:", err);
-    return "Failed to read PDF file.";
+    if (!response.data || !response.data.text) return "No readable text found in PDF.";
+    return response.data.text.replace(/\s+/g, " ").trim();
+  } catch (err: any) {
+    console.error("PDF.co read error:", err.response?.data || err.message || err);
+    return "Failed to read PDF via PDF.co.";
   }
-}
-// -------------------- PDF GENERATOR --------------------
-export async function generatePdfFromText(text: string): Promise<Buffer> {
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([600, 800]);
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontSize = 12;
-
-  const lines = text.split("\n");
-  let y = 780;
-
-  for (const line of lines) {
-    page.drawText(line, { x: 50, y, size: fontSize, font, color: rgb(0, 0, 0) });
-    y -= fontSize + 5;
-    if (y < 50) break; // Stop if page is full
-  }
-
-  return await pdfDoc.save();
 }
 
 // -------------------- SUMMARIZER ENTRY --------------------
@@ -91,17 +69,10 @@ export async function summarizeText(
     }
 
     if (type === "link" && typeof input === "string") {
-      const browser = await puppeteer.launch({
-        args: chromium.args,
-        defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(),
-        headless: true,
-      });
-      const page = await browser.newPage();
-      await page.goto(input, { waitUntil: "domcontentloaded", timeout: 60000 });
-      const textContent: string = await page.evaluate(() => document.body.innerText || "");
-      await browser.close();
-      return textContent ? ruleBasedTextSummarizer(textContent) : "Failed to extract text from webpage.";
+      // Use external scraping API instead of Puppeteer
+      const response = await axios.get(`https://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY}&url=${encodeURIComponent(input)}`);
+      const htmlText = response.data.replace(/<[^>]*>/g, " ");
+      return ruleBasedTextSummarizer(htmlText);
     }
 
     if (type === "youtube" && typeof input === "string") {
@@ -118,7 +89,7 @@ export async function summarizeText(
 
     return "Unsupported summarization type.";
   } catch (err: any) {
-    console.error("Summarizer entry error:", err.message || err);
+    console.error("Summarizer entry error:", err.response?.data || err.message || err);
     return "Summarization failed due to internal error.";
   }
 }
@@ -175,10 +146,7 @@ export async function detectFakeNews(text: string): Promise<{ isReal: boolean; c
 // -------------------- YouTube Helper --------------------
 export async function fetchYouTubeVideos(query: string, maxResults: number = 5): Promise<any[]> {
   try {
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(
-      query
-    )}&maxResults=${maxResults}&key=${YOUTUBE_API_KEY}`;
-
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&maxResults=${maxResults}&key=${YOUTUBE_API_KEY}`;
     const response = await axios.get(url);
     if (!response.data?.items || response.data.items.length === 0) return [];
 
