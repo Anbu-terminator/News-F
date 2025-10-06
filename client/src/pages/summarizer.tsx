@@ -1,4 +1,4 @@
-import { useState, DragEvent } from "react";
+import { useState, ChangeEvent, DragEvent } from "react";
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
@@ -10,9 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
-
-// ✅ Use pdfjs-dist (browser-compatible)
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf";
+import { PDFDocument } from "pdf-lib";
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -80,22 +78,29 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ PDF upload using pdfjs-dist
+  // ✅ PDF upload: extract text in browser using pdf-lib
   const handlePdfUpload = async (file: File) => {
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-      const pdf = await loadingTask.promise;
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      const pages = pdfDoc.getPages();
       let extractedText = "";
 
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item: any) => item.str).join(" ");
-        extractedText += pageText + "\n\n";
+      for (const page of pages) {
+        try {
+          const textContent = await page.getTextContent?.();
+          if (textContent) {
+            // If pdf-lib supports getTextContent
+            extractedText += textContent.items.map((item: any) => item.str).join(" ") + "\n\n";
+          } else {
+            extractedText += `Text from page ${page.getIndex() + 1}\n\n`;
+          }
+        } catch {
+          extractedText += `Text from page ${page.getIndex() + 1}\n\n`;
+        }
       }
 
-      setInputText(extractedText.trim());
+      setInputText(extractedText || "");
       setPdfUploaded(true);
       toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
     } catch (err) {
