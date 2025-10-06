@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import "pdfjs-dist/build/pdf.worker.entry"; // ✅ correct way for Vite
+import pdfWorker from "pdfjs-dist/build/pdf.worker.min?url"; // ✅ Vite-friendly import
 
 import {
   Dialog,
@@ -27,6 +27,9 @@ const SummarizerModal: React.FC<SummarizerModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [pdfName, setPdfName] = useState("");
   const [error, setError] = useState("");
+
+  // ✅ Set up pdf.js worker dynamically for Vite
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
   // ✅ Load PDF file and extract all text
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -63,7 +66,6 @@ const SummarizerModal: React.FC<SummarizerModalProps> = ({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        {/* Accessibility fix: provide title and description */}
         <DialogHeader>
           <DialogTitle>PDF Summarizer</DialogTitle>
           <DialogDescription>
