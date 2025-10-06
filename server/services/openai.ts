@@ -1,6 +1,5 @@
 import fs from "fs";
 import axios from "axios";
-import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
@@ -10,7 +9,7 @@ const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TO
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai";
 
-// Chatbot client (keep working)
+// Chatbot client
 export const client = new OpenAI({
   baseURL: "https://router.huggingface.co/v1",
   apiKey: HUGGINGFACE_API_KEY,
@@ -44,7 +43,6 @@ export function ruleBasedTextSummarizer(text: string): string {
 // -------------------- PDF SUMMARIZER (Server-Side) --------------------
 export async function summarizePdfBuffer(pdfBuffer: Buffer): Promise<string> {
   try {
-    // Dynamic import of pdfjs-dist (server-side only)
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf");
     const pdf = await pdfjs.getDocument({ data: pdfBuffer }).promise;
 
@@ -52,7 +50,11 @@ export async function summarizePdfBuffer(pdfBuffer: Buffer): Promise<string> {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      fullText += content.items.map((item: any) => item.str).join(" ") + "\n\n";
+      fullText += content.items
+        .map((item: any) => item.str || "")
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim() + "\n\n";
     }
 
     return ruleBasedTextSummarizer(fullText);
@@ -62,26 +64,26 @@ export async function summarizePdfBuffer(pdfBuffer: Buffer): Promise<string> {
   }
 }
 
-
 // -------------------- SUMMARIZER ENTRY --------------------
 export async function summarizeText(
   input: string | Buffer,
   type: "text" | "link" | "youtube" | "pdf" = "text"
 ): Promise<string> {
   try {
-    // 🧠 TEXT — purely rule-based
     if (type === "text" && typeof input === "string") {
       return ruleBasedTextSummarizer(input);
     }
 
-    // 📄 PDF — extract + local summarizer
-    if (type === "pdf" && Buffer.isBuffer(input)) {
+    if (type === "pdf") {
+      let pdfBuffer: Buffer;
+      if (Buffer.isBuffer(input)) pdfBuffer = input;
+      else if (typeof input === "string") pdfBuffer = Buffer.from(input, "base64");
+      else throw new Error("Invalid PDF input type");
+
       console.log("📄 Summarizing PDF locally...");
-      const pdfText = await readPdfContent(input);
-      return ruleBasedTextSummarizer(pdfText);
+      return summarizePdfBuffer(pdfBuffer);
     }
 
-    // 🌐 Normal link summarizer (unchanged)
     if (type === "link" && typeof input === "string") {
       const browser = await puppeteer.launch({
         args: chromium.args,
@@ -102,16 +104,14 @@ export async function summarizeText(
       await browser.close();
 
       const cleanedText = textContent.replace(/\s+/g, " ").trim();
-      if (!cleanedText) return "Failed to extract text from webpage.";
-      return ruleBasedTextSummarizer(cleanedText);
+      return cleanedText ? ruleBasedTextSummarizer(cleanedText) : "Failed to extract text from webpage.";
     }
 
-    // 🎥 YouTube summarizer (unchanged)
     if (type === "youtube" && typeof input === "string") {
       const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?&]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
-      const videoId = videoIdMatch[1];
 
+      const videoId = videoIdMatch[1];
       const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
       const response = await axios.get(url);
       const items = response.data?.items;
@@ -129,7 +129,7 @@ export async function summarizeText(
   }
 }
 
-// -------------------- CHATBOT (unchanged) --------------------
+// -------------------- CHATBOT --------------------
 export async function chatWithAI(message: string, context?: string): Promise<string> {
   try {
     const completion = await client.chat.completions.create({
@@ -141,6 +141,7 @@ export async function chatWithAI(message: string, context?: string): Promise<str
       temperature: 0.3,
       max_tokens: 500,
     });
+
     return completion.choices?.[0]?.message?.content?.trim() || "AI returned an empty response.";
   } catch (err: any) {
     console.error("Chat error:", err.response?.data || err.message || err);
@@ -148,7 +149,7 @@ export async function chatWithAI(message: string, context?: string): Promise<str
   }
 }
 
-// -------------------- FAKE NEWS DETECTION (CODE-BASED ONLY) --------------------
+// -------------------- FAKE NEWS DETECTION --------------------
 export async function detectFakeNews(text: string): Promise<{ isReal: boolean; confidence: number; reasoning: string }> {
   const trustedSources = [
     "the hindu","times of india","indian express","hindustan times","ndtv","business standard",
@@ -166,31 +167,27 @@ export async function detectFakeNews(text: string): Promise<{ isReal: boolean; c
   const lowerText = text.toLowerCase();
 
   for (const src of trustedSources) {
-    if (lowerText.includes(src)) {
-      return { isReal: true, confidence: 0.95, reasoning: `Trusted source: ${src}` };
-    }
+    if (lowerText.includes(src)) return { isReal: true, confidence: 0.95, reasoning: `Trusted source: ${src}` };
   }
 
-  // Heuristic check for common fake patterns
-  if (lowerText.includes("shocking") || lowerText.includes("breaking") || lowerText.includes("miracle")) {
+  if (lowerText.includes("shocking") || lowerText.includes("breaking") || lowerText.includes("miracle"))
     return { isReal: false, confidence: 0.3, reasoning: "Sensational language indicates possible misinformation." };
-  }
 
-  if (lowerText.length < 100) {
-    return { isReal: false, confidence: 0.4, reasoning: "Too short to verify credibility." };
-  }
+  if (lowerText.length < 100) return { isReal: false, confidence: 0.4, reasoning: "Too short to verify credibility." };
 
   return { isReal: false, confidence: 0.5, reasoning: "Source not verified against trusted list." };
 }
 
-// -------------------- YouTube Helper (unchanged) --------------------
+// -------------------- YouTube Helper --------------------
 export async function fetchYouTubeVideos(query: string, maxResults: number = 5): Promise<any[]> {
   try {
     const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(
       query
     )}&maxResults=${maxResults}&key=${YOUTUBE_API_KEY}`;
+
     const response = await axios.get(url);
     if (!response.data?.items || response.data.items.length === 0) return [];
+
     return response.data.items.map((item: any) => ({
       title: item.snippet?.title || "",
       description: item.snippet?.description || "",
