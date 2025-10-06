@@ -11,18 +11,18 @@ const __dirname = path.dirname(__filename);
 export default defineConfig(async () => {
   const plugins = [react(), runtimeErrorOverlay()];
 
-  // Replit-only plugins (optional)
+  // Optional Replit-only plugins
   if (process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined) {
-    const cartographer = await import("@replit/vite-plugin-cartographer").then((m) => m.cartographer());
-    const devBanner = await import("@replit/vite-plugin-dev-banner").then((m) => m.devBanner());
-    plugins.push(cartographer, devBanner);
+    const { cartographer } = await import("@replit/vite-plugin-cartographer");
+    const { devBanner } = await import("@replit/vite-plugin-dev-banner");
+    plugins.push(cartographer(), devBanner());
   }
 
   return {
     plugins,
     resolve: {
       alias: {
-        "@": path.resolve(__dirname, "client", "src"),
+        "@": path.resolve(__dirname, "client/src"),
         "@shared": path.resolve(__dirname, "shared"),
         "@assets": path.resolve(__dirname, "attached_assets"),
       },
@@ -32,17 +32,17 @@ export default defineConfig(async () => {
       outDir: path.resolve(__dirname, "dist/public"),
       emptyOutDir: true,
       rollupOptions: {
-        external: [], // keep empty unless you want to externalize packages
+        // external: ["wouter"], // optional if pre-bundling fails
       },
+    },
+    optimizeDeps: {
+      include: ["wouter"], // ✅ Pre-bundle wouter to fix Rollup resolve error
     },
     server: {
       fs: {
         strict: true,
         deny: ["**/.*"],
       },
-    },
-    optimizeDeps: {
-      include: ["wouter"], // <-- This ensures wouter is pre-bundled
     },
   };
 });
