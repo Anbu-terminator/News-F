@@ -11,8 +11,7 @@ import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 
-// PDF.js will be dynamically imported
-let pdfjsLib: any = null;
+let pdfjsLib: any = null; // dynamically loaded PDF.js
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -24,14 +23,14 @@ export default function Summarizer() {
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
-  // ✅ Dynamically load PDF.js when PDF tab is active
+  // ✅ Load PDF.js dynamically when PDF tab is active
   useEffect(() => {
     if (!pdfjsLib && activeTab === "pdf") {
-      import("pdfjs-dist/build/pdf").then((module) => {
+      import("pdfjs-dist/legacy/build/pdf").then((module) => {
         pdfjsLib = module;
         pdfjsLib.GlobalWorkerOptions.workerSrc =
           "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.worker.min.js";
-      });
+      }).catch(err => console.error("Failed to load PDF.js:", err));
     }
   }, [activeTab]);
 
@@ -99,8 +98,7 @@ export default function Summarizer() {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const strings = content.items.map((item: any) => item.str);
-      extractedText += strings.join(" ") + "\n";
+      extractedText += content.items.map((item: any) => item.str).join(" ") + "\n";
     }
     return extractedText.trim();
   };
@@ -128,11 +126,8 @@ export default function Summarizer() {
     e.stopPropagation();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type === "application/pdf") {
-      handlePdfUpload(file);
-    } else {
-      toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
-    }
+    if (file && file.type === "application/pdf") handlePdfUpload(file);
+    else toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
   };
 
   return (
