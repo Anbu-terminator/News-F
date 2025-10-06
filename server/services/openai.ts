@@ -4,12 +4,15 @@ import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js"; // ✅ for PDF text extraction
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.js"; // modern pdfjs-dist import
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai";
+
+// Set pdfjs worker
+GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${(getDocument as any).version}/pdf.worker.min.js`;
 
 export const client = new OpenAI({
   baseURL: "https://router.huggingface.co/v1",
@@ -44,25 +47,23 @@ export function ruleBasedTextSummarizer(text: string): string {
 // -------------------- PDF READER (USING pdfjs-dist) --------------------
 export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
   try {
-    let buffer: Buffer;
+    let data: Uint8Array;
 
     if (typeof pdfInput === "string") {
-      // Base64 string from frontend
-      buffer = Buffer.from(pdfInput, "base64");
+      data = new Uint8Array(Buffer.from(pdfInput, "base64"));
     } else {
-      buffer = pdfInput;
+      data = new Uint8Array(pdfInput);
     }
 
-    const loadingTask = pdfjsLib.getDocument({ data: buffer });
+    const loadingTask = getDocument({ data });
     const pdf = await loadingTask.promise;
 
     let fullText = "";
-
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map((item: any) => item.str).join(" ");
-      fullText += pageText + "\n";
+      const pageText = content.items.map((item: any) => ("str" in item ? item.str : "")).join(" ");
+      fullText += pageText + "\n\n";
     }
 
     return fullText.trim() || "No readable text found in PDF.";
