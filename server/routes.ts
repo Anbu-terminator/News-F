@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
 import bcrypt from "bcrypt";
+import formidable from "formidable";
 import { storage } from "./storage";
 import { insertUserSchema, insertCommentSchema, insertLikeSchema, insertBookmarkSchema } from "@shared/schema";
 import { summarizeText, detectFakeNews, chatWithAI } from "./services/openai";
