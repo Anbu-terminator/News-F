@@ -141,45 +141,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
- // ---------------- PDF Summarization ----------------
-  const pdfUploadDir = path.join(process.cwd(), "public", "uploads");
-  if (!fs.existsSync(pdfUploadDir)) fs.mkdirSync(pdfUploadDir, { recursive: true });
+// ---------------- PDF Summarization with PDF.co ----------------
+app.post("/api/summarize/pdf", async (req, res) => {
+  try {
+    const form = new formidable.IncomingForm({ keepExtensions: true });
+    form.parse(req, async (err, fields, files: any) => {
+      if (err) return res.status(500).json({ summary: "", error: "File upload failed" });
 
-  app.post("/api/summarize/pdf", async (req, res) => {
-    try {
-      const form = new formidable.IncomingForm({ uploadDir: pdfUploadDir, keepExtensions: true });
-      form.parse(req, async (err, fields, files: any) => {
-        if (err) return res.status(500).json({ summary: "", error: "File upload failed" });
+      const file = files.file;
+      if (!file) return res.status(400).json({ summary: "", error: "No PDF file uploaded" });
 
-        const file = files.file;
-        if (!file) return res.status(400).json({ summary: "", error: "No PDF file uploaded" });
+      const filePath = file.filepath || file.path;
+      const fileBuffer = fs.readFileSync(filePath);
 
-        const filePath = file.filepath || file.path;
-        const fileBuffer = fs.readFileSync(filePath);
+      // ---------------- PDF.co ----------------
+      const PDFCO_API_KEY = "bastoffcial@gmail.com_Q1GTZUlpOeDRke3okhHCexKqfZU0Zw27loiIOEeyhrOA6Eh0MTxKfo8NP8hl2lIr";
 
-        let extractedText = "";
-        try {
-          const pdfDoc = await PDFDocument.load(fileBuffer);
-          const pages = pdfDoc.getPages();
-          extractedText = pages.map(p => p.getTextContent?.()).join("\n") || "";
-        } catch {
-          extractedText = "";
-        }
+      // Using Node stream for PDF.co
+      const formData = new FormData();
+      formData.append("file", fs.createReadStream(filePath));
 
-        if (extractedText.trim().length > 0) {
-          const summary = await summarizeText(extractedText, "pdf");
-          res.json({ summary });
-        } else {
-          const fileName = path.basename(filePath);
-          const pdfUrl = `/uploads/${fileName}`;
-          res.json({ summary: "", pdfUrl });
-        }
+      const pdfCoResponse = await fetch("https://api.pdf.co/v1/pdf/convert/to/text", {
+        method: "POST",
+        headers: { "x-api-key": PDFCO_API_KEY },
+        body: formData as any,
       });
-    } catch (error: any) {
-      console.error("PDF Summarize handler error:", error);
-      res.status(500).json({ summary: "", error: error.message || "Failed to process PDF" });
-    }
-  });
+
+      const pdfCoData = await pdfCoResponse.json();
+      if (!pdfCoData || !pdfCoData.text) {
+        return res.status(500).json({ summary: "", error: "Failed to extract text from PDF" });
+      }
+
+      const extractedText = pdfCoData.text;
+      if (extractedText.trim().length === 0) {
+        return res.status(400).json({ summary: "", error: "PDF contains no extractable text" });
+      }
+
+      // Summarize using existing function
+      const summary = await summarizeText(extractedText, "pdf");
+      res.json({ summary });
+    });
+  } catch (error: any) {
+    console.error("PDF Summarize handler error:", error);
+    res.status(500).json({ summary: "", error: error.message || "Failed to process PDF" });
+  }
+});
+
 
   // Fake news check
   app.post("/api/fakecheck", async (req, res) => {
