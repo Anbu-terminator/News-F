@@ -1,4 +1,4 @@
-import { useState, DragEvent } from "react";
+import { useState, DragEvent, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
@@ -11,6 +11,13 @@ import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 
+// declare pdfjsLib globally (loaded via CDN)
+declare global {
+  interface Window {
+    pdfjsLib: any;
+  }
+}
+
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
   const [summary, setSummary] = useState("");
@@ -20,6 +27,19 @@ export default function Summarizer() {
   const [isDragging, setIsDragging] = useState(false);
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
+
+  // load PDF.js worker via CDN on first render
+  useEffect(() => {
+    if (!window.pdfjsLib) {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js";
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js";
+      };
+      document.body.appendChild(script);
+    }
+  }, []);
 
   const parseApiResult = async (res: Response) => {
     try {
@@ -75,27 +95,20 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ Browser-only dynamic import to avoid Vite build issues
+  // Extract PDF text using PDF.js from CDN
   const extractPdfText = async (file: File) => {
-    try {
-      const pdfjsLib = await import("pdfjs-dist/webpack");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js`;
+    if (!window.pdfjsLib) throw new Error("PDF.js not loaded yet");
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
-      let text = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map((item: any) => item.str);
-        text += strings.join(" ") + "\n";
-      }
-      return text.trim();
-    } catch (err) {
-      console.error("PDF.js error:", err);
-      throw new Error("Failed to parse PDF");
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map((item: any) => item.str);
+      text += strings.join(" ") + "\n";
     }
+    return text.trim();
   };
 
   const handlePdfUpload = async (file: File) => {
@@ -218,4 +231,3 @@ export default function Summarizer() {
     </div>
   );
 }
-A
