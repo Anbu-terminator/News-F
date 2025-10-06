@@ -18,20 +18,9 @@ export default function Summarizer() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"text" | "url" | "pdf" | "youtube">("text");
   const [isDragging, setIsDragging] = useState(false);
-  const [pdfUploaded, setPdfUploaded] = useState(false);
-  const [downloadLink, setDownloadLink] = useState("");
+  const [pdfUploaded, setPdfUploaded] = useState<File | null>(null);
   const { toast } = useToast();
 
-  const parseApiResult = async (res: any) => {
-    try {
-      const parsed = await res.json();
-      return { parsed, status: res.status };
-    } catch {
-      return { parsed: null, status: 500 };
-    }
-  };
-
-  // ---------------- Summarize ----------------
   const handleSummarize = async () => {
     if ((!inputText.trim() && activeTab !== "pdf") || (activeTab === "pdf" && !pdfUploaded)) {
       toast({
@@ -45,51 +34,45 @@ export default function Summarizer() {
     setLoading(true);
     setSummary("");
     setErrorMsg("");
-    setDownloadLink("");
 
     try {
-      if (activeTab === "pdf") {
-        const fileInput = document.getElementById("pdf-upload-input") as HTMLInputElement;
-        if (!fileInput?.files?.[0]) throw new Error("PDF not uploaded");
-
+      if (activeTab === "pdf" && pdfUploaded) {
+        // PDF.co API integration
         const formData = new FormData();
-        formData.append("file", fileInput.files[0]);
+        formData.append("file", pdfUploaded);
 
-        const raw = await fetch("/api/summarize/pdf", { method: "POST", body: formData });
-        const { parsed } = await parseApiResult(raw);
+        const res = await fetch("/api/summarize/pdf", {
+          method: "POST",
+          body: formData,
+        });
 
-        if (parsed?.summary) {
-          setSummary(parsed.summary);
-          toast({ title: "Summary generated!", description: "Your PDF was successfully summarized" });
-        } else if (parsed?.pdfUrl) {
-          setDownloadLink(parsed.pdfUrl);
-          toast({ title: "PDF ready", description: "Text extraction failed. Download original PDF." });
+        const data = await res.json();
+        if (data?.summary) {
+          setSummary(data.summary);
+          toast({ title: "Summary generated!", description: "PDF summarized via PDF.co" });
         } else {
-          throw new Error(parsed?.error || "Failed to process PDF");
+          throw new Error(data?.error || "Failed to summarize PDF");
         }
-
       } else {
         const body: Record<string, any> = {};
         if (activeTab === "text") body.text = inputText;
-        if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
+        else if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
 
-        const raw = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
-        const { parsed } = await parseApiResult(raw);
+        const res = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
+        const data = await res.json();
 
-        const summaryText =
-          parsed?.summary ?? parsed?.result ?? parsed?.message ?? parsed?.data?.summary ?? "";
-
+        const summaryText = data?.summary ?? data?.result ?? data?.message ?? "";
         if (summaryText.trim()) {
           setSummary(summaryText.trim());
           toast({ title: "Summary generated!", description: "Content successfully summarized" });
         } else {
-          throw new Error(parsed?.error || parsed?.message || "Invalid response from server");
+          throw new Error(data?.error || "Invalid response from server");
         }
       }
-    } catch (error: any) {
-      console.error("Summarizer error:", error);
-      setErrorMsg(error?.message || "Failed to generate summary");
-      toast({ title: "Error", description: error?.message, variant: "destructive" });
+    } catch (err: any) {
+      console.error("Summarizer error:", err);
+      setErrorMsg(err?.message || "Failed to generate summary");
+      toast({ title: "Error", description: err?.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -99,13 +82,12 @@ export default function Summarizer() {
     setInputText("");
     setSummary("");
     setErrorMsg("");
-    setPdfUploaded(false);
-    setDownloadLink("");
+    setPdfUploaded(null);
   };
 
-  const handlePdfUpload = async (file: File) => {
-    setPdfUploaded(true);
-    setInputText(file.name); // Optional: display filename
+  const handlePdfUpload = (file: File) => {
+    setPdfUploaded(file);
+    setInputText(file.name);
     toast({ title: "PDF loaded", description: "PDF uploaded successfully" });
   };
 
@@ -120,11 +102,8 @@ export default function Summarizer() {
     e.stopPropagation();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type === "application/pdf") {
-      handlePdfUpload(file);
-    } else {
-      toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
-    }
+    if (file && file.type === "application/pdf") handlePdfUpload(file);
+    else toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
   };
 
   return (
@@ -137,7 +116,7 @@ export default function Summarizer() {
         </div>
 
         <Card className="p-6">
-          <Tabs value={activeTab} onValueChange={(v: string) => setActiveTab(v as any)}>
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
             <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="text"><FileText className="w-4 h-4 mr-2" />Text</TabsTrigger>
               <TabsTrigger value="pdf"><Upload className="w-4 h-4 mr-2" />PDF</TabsTrigger>
@@ -196,22 +175,18 @@ export default function Summarizer() {
 
           <div className="flex justify-end space-x-3 mt-6">
             <Button variant="outline" onClick={handleReset}>Reset</Button>
-            <Button onClick={handleSummarize} disabled={loading || (!inputText.trim() && activeTab !== "pdf")}>
+            <Button onClick={handleSummarize} disabled={loading || (!inputText.trim() && !pdfUploaded)}>
               {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating...</> : "Generate Summary"}
             </Button>
           </div>
         </Card>
 
-        {(summary || errorMsg || downloadLink) && (
+        {(summary || errorMsg) && (
           <Card className="p-6 mt-6">
             <h2 className="text-xl font-semibold mb-4">Summary:</h2>
             <div className="bg-muted p-4 rounded-lg">
               {summary ? (
                 <p className="whitespace-pre-wrap text-muted-foreground">{summary}</p>
-              ) : downloadLink ? (
-                <a href={downloadLink} target="_blank" className="text-blue-600 underline">
-                  Download original PDF
-                </a>
               ) : (
                 <p className="whitespace-pre-wrap text-muted-foreground">⚠️ {errorMsg}</p>
               )}
