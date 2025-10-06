@@ -4,7 +4,7 @@ import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import pkg from "pdf2json"; // ✅ FIXED IMPORT for CommonJS module
+import pkg from "pdf2json"; // ✅ Correct import for CommonJS
 const { PDFParser } = pkg;
 
 // -------------------- CONFIG --------------------
@@ -34,19 +34,33 @@ export function ruleBasedTextSummarizer(text: string): string {
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- PDF READER USING pdf2json --------------------
+// -------------------- FIXED PDF READER USING pdf2json --------------------
 export function readPdfContent(pdfInput: Buffer | string): Promise<string> {
   return new Promise((resolve, reject) => {
     try {
       const pdfParser = new PDFParser();
+
       pdfParser.on("pdfParser_dataError", (err) => reject(err.parserError));
+
       pdfParser.on("pdfParser_dataReady", (pdfData) => {
-        const text = pdfData.formImage.Pages.map((page: any) =>
-          page.Texts.map((item: any) => decodeURIComponent(item.R[0].T)).join(" ")
-        ).join("\n\n");
-        resolve(text.trim() || "No readable text found in PDF.");
+        try {
+          // ✅ Extract readable text from Pages safely
+          const pages = pdfData?.Pages || pdfData?.formImage?.Pages || [];
+          const text = pages
+            .map((page: any) =>
+              page.Texts.map((t: any) =>
+                decodeURIComponent(t.R.map((r: any) => r.T).join(""))
+              ).join(" ")
+            )
+            .join("\n\n");
+
+          resolve(text.trim() || "No readable text found in PDF.");
+        } catch (err) {
+          reject("Failed to parse PDF structure properly.");
+        }
       });
 
+      // ✅ Parse buffer correctly
       if (typeof pdfInput === "string") {
         const buffer = Buffer.from(pdfInput, "base64");
         pdfParser.parseBuffer(buffer);
@@ -70,6 +84,12 @@ export async function summarizeText(
 
     if (type === "pdf") {
       const pdfText = await readPdfContent(input);
+
+      // ✅ Added: check actual text before summarization
+      if (!pdfText || pdfText.trim().length === 0) {
+        return "No readable text extracted from the PDF.";
+      }
+
       return ruleBasedTextSummarizer(pdfText);
     }
 
@@ -80,13 +100,17 @@ export async function summarizeText(
         executablePath: await chromium.executablePath(),
         headless: true,
       });
+
       const page = await browser.newPage();
       await page.goto(input, { waitUntil: "domcontentloaded", timeout: 60000 });
+
       await page.evaluate(() => {
         Array.from(document.querySelectorAll("script, style, noscript, iframe")).forEach((el) => el.remove());
       });
+
       const textContent: string = await page.evaluate(() => document.body.innerText || "");
       await browser.close();
+
       const cleanedText = textContent.replace(/\s+/g, " ").trim();
       return cleanedText ? ruleBasedTextSummarizer(cleanedText) : "Failed to extract text from webpage.";
     }
