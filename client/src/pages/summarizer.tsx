@@ -1,4 +1,4 @@
-import { useState, ChangeEvent, DragEvent } from "react";
+import { useState, DragEvent } from "react";
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
@@ -10,8 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
-
-// Removed pdfjs-dist import to fix Vite/Rollup build error
+import * as pdfjsLib from "pdfjs-dist/webpack"; // ✅ browser-compatible
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -79,26 +78,43 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ Browser-compatible PDF text extraction
+  // ✅ Real PDF extraction in browser
   const extractPdfText = async (file: File) => {
     try {
       const arrayBuffer = await file.arrayBuffer();
-      // Minimal placeholder for browser-safe PDF extraction
-      // You can replace this with server-side extraction if needed
-      return "PDF uploaded. (Text extraction simulated for browser safety)";
-    } catch {
-      return "";
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = "";
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((item: any) => (item.str ? item.str : "")).join(" ");
+        fullText += `Page ${i}:\n${pageText}\n\n`;
+      }
+
+      return fullText || "No readable text found in PDF.";
+    } catch (err: any) {
+      console.error("PDF extraction error:", err);
+      return "Failed to extract text from PDF.";
     }
   };
 
-  const handlePdfUpload = async (file: File) => {
-    try {
-      const text = await extractPdfText(file);
-      setInputText(text);
-      setPdfUploaded(true);
-      toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
-    } catch (err) {
-      toast({ title: "Error", description: "Failed to extract text from PDF", variant: "destructive" });
+  const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type === "application/pdf") {
+      try {
+        const text = await extractPdfText(file);
+        setInputText(text);
+        setPdfUploaded(true);
+        toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
+      } catch {
+        toast({ title: "Error", description: "Failed to extract text from PDF", variant: "destructive" });
+      }
+    } else {
+      toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
     }
   };
 
@@ -106,18 +122,6 @@ export default function Summarizer() {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(entering);
-  };
-
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file && file.type === "application/pdf") {
-      handlePdfUpload(file);
-    } else {
-      toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
-    }
   };
 
   return (
@@ -169,7 +173,7 @@ export default function Summarizer() {
                     id="pdf-upload-input"
                     type="file"
                     accept="application/pdf"
-                    onChange={(e) => e.target.files && handlePdfUpload(e.target.files[0])}
+                    onChange={async (e) => e.target.files && handleDrop({ ...e, dataTransfer: { files: e.target.files } } as any)}
                     className="hidden"
                   />
                 </motion.div>
