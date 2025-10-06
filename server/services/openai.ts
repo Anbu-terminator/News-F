@@ -4,7 +4,7 @@ import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import { PDFDocument } from "pdf-lib"; // ✅ using pdf-lib only
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js"; // ✅ for PDF text extraction
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
@@ -41,29 +41,31 @@ export function ruleBasedTextSummarizer(text: string): string {
   }
 }
 
-// -------------------- PDF READER USING PDF-LIB ONLY --------------------
+// -------------------- PDF READER (USING pdfjs-dist) --------------------
 export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
   try {
     let buffer: Buffer;
 
     if (typeof pdfInput === "string") {
-      // Decode Base64 string from frontend
+      // Base64 string from frontend
       buffer = Buffer.from(pdfInput, "base64");
     } else {
       buffer = pdfInput;
     }
 
-    const pdfDoc = await PDFDocument.load(buffer);
-    const pageCount = pdfDoc.getPageCount();
+    const loadingTask = pdfjsLib.getDocument({ data: buffer });
+    const pdf = await loadingTask.promise;
 
-    let textContent = "";
-    for (let i = 0; i < pageCount; i++) {
-      const page = pdfDoc.getPage(i);
-      // pdf-lib doesn't extract raw text; we add placeholder info per page
-      textContent += `Page ${i + 1}: [Text extraction placeholder]\n`;
+    let fullText = "";
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map((item: any) => item.str).join(" ");
+      fullText += pageText + "\n";
     }
 
-    return textContent || "No readable text found in PDF.";
+    return fullText.trim() || "No readable text found in PDF.";
   } catch (err: any) {
     console.error("PDF read error:", err.message || err);
     return "Failed to read PDF file.";
