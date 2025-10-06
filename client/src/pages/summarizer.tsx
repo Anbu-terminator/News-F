@@ -1,4 +1,4 @@
-import { useState, DragEvent, useEffect } from "react";
+import { useState, DragEvent } from "react";
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
@@ -11,8 +11,6 @@ import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 
-let pdfjsLib: any = null; // dynamically loaded PDF.js
-
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
   const [summary, setSummary] = useState("");
@@ -23,16 +21,12 @@ export default function Summarizer() {
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
-  // ✅ Load PDF.js dynamically when PDF tab is active
-  useEffect(() => {
-    if (!pdfjsLib && activeTab === "pdf") {
-      import("pdfjs-dist/legacy/build/pdf").then((module) => {
-        pdfjsLib = module;
-        pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.worker.min.js";
-      }).catch(err => console.error("Failed to load PDF.js:", err));
-    }
-  }, [activeTab]);
+  // ✅ Dynamic import for PDF.js to fix Vite build issues
+  const loadPdfJs = async () => {
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js`;
+    return pdfjsLib;
+  };
 
   const parseApiResult = async (res: any) => {
     try {
@@ -63,16 +57,17 @@ export default function Summarizer() {
       if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
 
       const raw = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
-      const { parsed } = await parseApiResult(raw);
+      const { parsed, status } = await parseApiResult(raw);
 
-      const summaryText =
-        parsed?.summary ?? parsed?.result ?? parsed?.message ?? parsed?.data?.summary ?? "";
+      if (!parsed || status !== 200) throw new Error(parsed?.error || "Invalid response from server");
+
+      const summaryText = parsed?.summary ?? parsed?.result ?? "";
 
       if (summaryText.trim()) {
         setSummary(summaryText.trim());
         toast({ title: "Summary generated!", description: "Your content has been successfully summarized" });
       } else {
-        throw new Error(parsed?.error || parsed?.message || "Invalid response from server");
+        throw new Error("No summary returned from server");
       }
     } catch (error: any) {
       console.error("Summarizer error:", error);
@@ -90,15 +85,17 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
+  // ✅ Extract text from PDF
   const extractPdfText = async (file: File) => {
-    if (!pdfjsLib) throw new Error("PDF.js not loaded yet");
+    const pdfjsLib = await loadPdfJs();
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     let extractedText = "";
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      extractedText += content.items.map((item: any) => item.str).join(" ") + "\n";
+      const strings = content.items.map((item: any) => item.str);
+      extractedText += strings.join(" ") + "\n";
     }
     return extractedText.trim();
   };
@@ -110,7 +107,6 @@ export default function Summarizer() {
       setPdfUploaded(true);
       toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
     } catch (err) {
-      console.error(err);
       toast({ title: "Error", description: "Failed to extract text from PDF", variant: "destructive" });
     }
   };
@@ -126,8 +122,11 @@ export default function Summarizer() {
     e.stopPropagation();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type === "application/pdf") handlePdfUpload(file);
-    else toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
+    if (file && file.type === "application/pdf") {
+      handlePdfUpload(file);
+    } else {
+      toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
+    }
   };
 
   return (
