@@ -1,6 +1,6 @@
 import { useState, DragEvent } from "react";
-import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.js?url";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf"; // ✅ legacy build for Vite
+import pdfjsWorker from "pdfjs-dist/legacy/build/pdf.worker.entry"; // ✅ Vite-safe worker
 
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
@@ -14,8 +14,8 @@ import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 
-// ✅ Set pdf.js worker dynamically for Vite
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+// ✅ Set worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -83,7 +83,6 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ Real PDF text extraction
   const extractPdfText = async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
