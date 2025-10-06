@@ -105,7 +105,7 @@ export default function Summarizer() {
 
   const handlePdfUpload = async (file: File) => {
     setPdfUploaded(true);
-    setInputText(file.name); // Optional: display filename in input
+    setInputText(file.name); // Optional: display filename
     toast({ title: "PDF loaded", description: "PDF uploaded successfully" });
   };
 
