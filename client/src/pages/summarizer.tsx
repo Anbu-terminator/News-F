@@ -21,7 +21,14 @@ export default function Summarizer() {
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
-  const parseApiResult = async (res: Response) => {
+  // ✅ Dynamic import for PDF.js to fix Vite build issues
+  const loadPdfJs = async () => {
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js`;
+    return pdfjsLib;
+  };
+
+  const parseApiResult = async (res: any) => {
     try {
       const parsed = await res.json();
       return { parsed, status: res.status };
@@ -50,14 +57,17 @@ export default function Summarizer() {
       if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
 
       const raw = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
-      const { parsed } = await parseApiResult(raw);
+      const { parsed, status } = await parseApiResult(raw);
+
+      if (!parsed || status !== 200) throw new Error(parsed?.error || "Invalid response from server");
 
       const summaryText = parsed?.summary ?? parsed?.result ?? "";
-      if (summaryText) {
+
+      if (summaryText.trim()) {
         setSummary(summaryText.trim());
         toast({ title: "Summary generated!", description: "Your content has been successfully summarized" });
       } else {
-        throw new Error(parsed?.message || "Invalid response from server");
+        throw new Error("No summary returned from server");
       }
     } catch (error: any) {
       console.error("Summarizer error:", error);
@@ -75,38 +85,29 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ Browser-only dynamic import to avoid Vite build issues
+  // ✅ Extract text from PDF
   const extractPdfText = async (file: File) => {
-    try {
-      const pdfjsLib = await import("pdfjs-dist/webpack");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js`;
-
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
-      let text = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map((item: any) => item.str);
-        text += strings.join(" ") + "\n";
-      }
-      return text.trim();
-    } catch (err) {
-      console.error("PDF.js error:", err);
-      throw new Error("Failed to parse PDF");
+    const pdfjsLib = await loadPdfJs();
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let extractedText = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map((item: any) => item.str);
+      extractedText += strings.join(" ") + "\n";
     }
+    return extractedText.trim();
   };
 
   const handlePdfUpload = async (file: File) => {
     try {
       const text = await extractPdfText(file);
-      if (!text) throw new Error("No text found in PDF");
       setInputText(text);
       setPdfUploaded(true);
       toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
-    } catch (err: any) {
-      toast({ title: "Error", description: err?.message || "Failed to extract text from PDF", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to extract text from PDF", variant: "destructive" });
     }
   };
 
