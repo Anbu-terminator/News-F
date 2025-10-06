@@ -1,4 +1,4 @@
-import { useState, DragEvent, useEffect } from "react";
+import { useState, DragEvent } from "react";
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
@@ -11,13 +11,6 @@ import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 
-// declare pdfjsLib globally (loaded via CDN)
-declare global {
-  interface Window {
-    pdfjsLib: any;
-  }
-}
-
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
   const [summary, setSummary] = useState("");
@@ -28,20 +21,14 @@ export default function Summarizer() {
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
-  // load PDF.js worker via CDN on first render
-  useEffect(() => {
-    if (!window.pdfjsLib) {
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js";
-      script.onload = () => {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js";
-      };
-      document.body.appendChild(script);
-    }
-  }, []);
+  // ✅ Dynamic import for PDF.js to fix Vite build issues
+  const loadPdfJs = async () => {
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js`;
+    return pdfjsLib;
+  };
 
-  const parseApiResult = async (res: Response) => {
+  const parseApiResult = async (res: any) => {
     try {
       const parsed = await res.json();
       return { parsed, status: res.status };
@@ -70,14 +57,17 @@ export default function Summarizer() {
       if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
 
       const raw = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
-      const { parsed } = await parseApiResult(raw);
+      const { parsed, status } = await parseApiResult(raw);
+
+      if (!parsed || status !== 200) throw new Error(parsed?.error || "Invalid response from server");
 
       const summaryText = parsed?.summary ?? parsed?.result ?? "";
-      if (summaryText) {
+
+      if (summaryText.trim()) {
         setSummary(summaryText.trim());
         toast({ title: "Summary generated!", description: "Your content has been successfully summarized" });
       } else {
-        throw new Error(parsed?.message || "Invalid response from server");
+        throw new Error("No summary returned from server");
       }
     } catch (error: any) {
       console.error("Summarizer error:", error);
@@ -95,31 +85,29 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // Extract PDF text using PDF.js from CDN
+  // ✅ Extract text from PDF
   const extractPdfText = async (file: File) => {
-    if (!window.pdfjsLib) throw new Error("PDF.js not loaded yet");
+    const pdfjsLib = await loadPdfJs();
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
-    let text = "";
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let extractedText = "";
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
       const strings = content.items.map((item: any) => item.str);
-      text += strings.join(" ") + "\n";
+      extractedText += strings.join(" ") + "\n";
     }
-    return text.trim();
+    return extractedText.trim();
   };
 
   const handlePdfUpload = async (file: File) => {
     try {
       const text = await extractPdfText(file);
-      if (!text) throw new Error("No text found in PDF");
       setInputText(text);
       setPdfUploaded(true);
       toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
-    } catch (err: any) {
-      toast({ title: "Error", description: err?.message || "Failed to extract text from PDF", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to extract text from PDF", variant: "destructive" });
     }
   };
 
