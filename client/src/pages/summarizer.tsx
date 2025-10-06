@@ -10,10 +10,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf";
-
-// Use PDF.js CDN for worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js`;
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -56,7 +52,6 @@ export default function Summarizer() {
       const raw = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
       const { parsed } = await parseApiResult(raw);
 
-      // Handle backend response safely
       const summaryText = parsed?.summary ?? parsed?.result ?? "";
       if (summaryText) {
         setSummary(summaryText.trim());
@@ -80,17 +75,27 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
+  // ✅ Browser-only dynamic import to avoid Vite build issues
   const extractPdfText = async (file: File) => {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const strings = content.items.map((item: any) => item.str);
-      text += strings.join(" ") + "\n";
+    try {
+      const pdfjsLib = await import("pdfjs-dist/webpack");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js`;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item: any) => item.str);
+        text += strings.join(" ") + "\n";
+      }
+      return text.trim();
+    } catch (err) {
+      console.error("PDF.js error:", err);
+      throw new Error("Failed to parse PDF");
     }
-    return text.trim();
   };
 
   const handlePdfUpload = async (file: File) => {
