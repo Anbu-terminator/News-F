@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 
-// ✅ PDF.js will be loaded dynamically
+// PDF.js will be dynamically imported
 let pdfjsLib: any = null;
 
 export default function Summarizer() {
@@ -24,7 +24,7 @@ export default function Summarizer() {
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
-  // ✅ Dynamically load PDF.js in browser
+  // Dynamically load PDF.js
   useEffect(() => {
     if (!pdfjsLib && activeTab === "pdf") {
       import("pdfjs-dist/build/pdf").then((module) => {
