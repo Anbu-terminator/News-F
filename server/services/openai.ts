@@ -4,8 +4,7 @@ import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import pkg from "pdf2json"; // ✅ Correct import for CommonJS
-const { PDFParser } = pkg;
+import extract from "pdf-text-extract"; // ✅ Accurate PDF text extraction
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
@@ -34,39 +33,32 @@ export function ruleBasedTextSummarizer(text: string): string {
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- FIXED PDF READER USING pdf2json --------------------
-export function readPdfContent(pdfInput: Buffer | string): Promise<string> {
+// -------------------- FIXED PDF READER USING pdf-text-extract --------------------
+export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
   return new Promise((resolve, reject) => {
     try {
-      const pdfParser = new PDFParser();
+      const tempPath = "./temp.pdf";
 
-      pdfParser.on("pdfParser_dataError", (err) => reject(err.parserError));
+      // ✅ Handle base64 or buffer input
+      const buffer = typeof pdfInput === "string" ? Buffer.from(pdfInput, "base64") : pdfInput;
+      fs.writeFileSync(tempPath, buffer);
 
-      pdfParser.on("pdfParser_dataReady", (pdfData) => {
-        try {
-          // ✅ Extract readable text from Pages safely
-          const pages = pdfData?.Pages || pdfData?.formImage?.Pages || [];
-          const text = pages
-            .map((page: any) =>
-              page.Texts.map((t: any) =>
-                decodeURIComponent(t.R.map((r: any) => r.T).join(""))
-              ).join(" ")
-            )
-            .join("\n\n");
+      // ✅ Extract text from PDF
+      extract(tempPath, (err: any, pages: string[]) => {
+        fs.unlinkSync(tempPath); // cleanup temp file
+        if (err) {
+          console.error("PDF extraction error:", err);
+          reject("Failed to read PDF file.");
+          return;
+        }
 
-          resolve(text.trim() || "No readable text found in PDF.");
-        } catch (err) {
-          reject("Failed to parse PDF structure properly.");
+        const text = pages.join("\n\n").trim();
+        if (!text || text.length === 0) {
+          resolve("No readable text found in PDF.");
+        } else {
+          resolve(text);
         }
       });
-
-      // ✅ Parse buffer correctly
-      if (typeof pdfInput === "string") {
-        const buffer = Buffer.from(pdfInput, "base64");
-        pdfParser.parseBuffer(buffer);
-      } else {
-        pdfParser.parseBuffer(pdfInput);
-      }
     } catch (err: any) {
       console.error("PDF read error:", err.message || err);
       reject("Failed to read PDF file.");
@@ -84,12 +76,9 @@ export async function summarizeText(
 
     if (type === "pdf") {
       const pdfText = await readPdfContent(input);
-
-      // ✅ Added: check actual text before summarization
       if (!pdfText || pdfText.trim().length === 0) {
         return "No readable text extracted from the PDF.";
       }
-
       return ruleBasedTextSummarizer(pdfText);
     }
 
