@@ -1,4 +1,4 @@
-import { useState, ChangeEvent, DragEvent, useEffect } from "react";
+import { useState, DragEvent, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 
-// 🔹 PDF.js will be loaded dynamically
+// ✅ PDF.js will be loaded dynamically
 let pdfjsLib: any = null;
 
 export default function Summarizer() {
@@ -24,7 +24,7 @@ export default function Summarizer() {
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
-  // ✅ Load PDF.js dynamically in browser
+  // ✅ Dynamically load PDF.js in browser
   useEffect(() => {
     if (!pdfjsLib && activeTab === "pdf") {
       import("pdfjs-dist/build/pdf").then((module) => {
@@ -91,7 +91,6 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ Extract actual text from PDF dynamically
   const extractPdfText = async (file: File) => {
     if (!pdfjsLib) throw new Error("PDF.js not loaded yet");
     const arrayBuffer = await file.arrayBuffer();
