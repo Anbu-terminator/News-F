@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Route, Router } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,18 +12,18 @@ import Chatbot from "@/pages/chatbot";
 import TNPSC from "@/pages/tnpsc";
 import Auth from "@/pages/auth";
 
-function Router() {
+function AppRouter() {
   return (
-    <Switch>
+    <Router>
       <Route path="/" component={Home} />
       <Route path="/summarizer" component={Summarizer} />
       <Route path="/fake-detector" component={FakeNews} />
       <Route path="/chatbot" component={Chatbot} />
       <Route path="/tnpsc" component={TNPSC} />
       <Route path="/auth" component={Auth} />
-      {/* Fallback to 404 */}
-      <Route component={NotFound} />
-    </Switch>
+      {/* Fallback */}
+      <Route path="*" component={NotFound} />
+    </Router>
   );
 }
 
@@ -33,7 +33,7 @@ function App() {
       <ThemeProvider defaultTheme="light" storageKey="flashpress-ui-theme">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <AppRouter />
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>
