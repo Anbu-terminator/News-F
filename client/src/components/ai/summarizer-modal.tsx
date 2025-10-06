@@ -14,6 +14,10 @@ import { Card } from "@/components/ui/card";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2 } from "lucide-react";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.mjs";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface SummarizerModalProps {
   open: boolean;
@@ -25,13 +29,14 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
   const [summary, setSummary] = useState("");
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("text");
+  const [pdfName, setPdfName] = useState("");
   const { toast } = useToast();
 
   const handleSummarize = async () => {
     if (!inputText.trim()) {
       toast({
         title: "Input required",
-        description: "Please enter text or URL to summarize",
+        description: "Please enter text or upload a PDF to summarize.",
         variant: "destructive",
       });
       return;
@@ -45,13 +50,12 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
         { text: inputText },
         false
       );
-
       const data = await response.json();
       setSummary(data.summary);
 
       toast({
         title: "Summary generated!",
-        description: "Your content has been successfully summarized",
+        description: "Your content has been successfully summarized.",
       });
     } catch (error) {
       toast({
@@ -64,9 +68,46 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
     }
   };
 
+  const handlePDFUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setPdfName(file.name);
+    setLoading(true);
+    try {
+      const pdfData = new Uint8Array(await file.arrayBuffer());
+      const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+
+      let extractedText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item: any) => item.str);
+        extractedText += strings.join(" ") + "\n\n";
+      }
+
+      setInputText(extractedText);
+      toast({
+        title: "PDF Extracted",
+        description: `Extracted text from ${pdf.numPages} page(s). Ready to summarize.`,
+      });
+    } catch (error) {
+      console.error("PDF extraction failed:", error);
+      toast({
+        title: "Error reading PDF",
+        description:
+          "Could not extract text. Try using a different file or ensure it’s not scanned.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleReset = () => {
     setInputText("");
     setSummary("");
+    setPdfName("");
   };
 
   return (
@@ -80,8 +121,6 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
             <FileText className="w-5 h-5" />
             <span>AI Article Summarizer</span>
           </DialogTitle>
-
-          {/* ✅ Added description for accessibility */}
           <DialogDescription>
             Paste text, enter a URL, upload a PDF, or provide a YouTube link to
             get an instant AI-generated summary.
@@ -91,24 +130,25 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
         <div className="space-y-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="text" data-testid="tab-text">
+              <TabsTrigger value="text">
                 <FileText className="w-4 h-4 mr-2" />
                 Text
               </TabsTrigger>
-              <TabsTrigger value="url" data-testid="tab-url">
+              <TabsTrigger value="url">
                 <Link className="w-4 h-4 mr-2" />
                 URL
               </TabsTrigger>
-              <TabsTrigger value="pdf" data-testid="tab-pdf">
+              <TabsTrigger value="pdf">
                 <Upload className="w-4 h-4 mr-2" />
                 PDF
               </TabsTrigger>
-              <TabsTrigger value="youtube" data-testid="tab-youtube">
+              <TabsTrigger value="youtube">
                 <Youtube className="w-4 h-4 mr-2" />
                 YouTube
               </TabsTrigger>
             </TabsList>
 
+            {/* TEXT TAB */}
             <TabsContent value="text" className="space-y-4">
               <div>
                 <Label htmlFor="text-input">Enter text to summarize</Label>
@@ -118,11 +158,11 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
                   onChange={(e) => setInputText(e.target.value)}
                   placeholder="Paste your article text here..."
                   className="min-h-[200px] resize-none"
-                  data-testid="input-text-summarize"
                 />
               </div>
             </TabsContent>
 
+            {/* URL TAB */}
             <TabsContent value="url" className="space-y-4">
               <div>
                 <Label htmlFor="url-input">Enter article URL</Label>
@@ -132,28 +172,39 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
                   onChange={(e) => setInputText(e.target.value)}
                   placeholder="https://example.com/article"
                   className="min-h-[100px] resize-none"
-                  data-testid="input-url-summarize"
                 />
                 <p className="text-sm text-muted-foreground mt-2">
-                  Note: URL content extraction is coming soon. For now, please
-                  copy and paste the article text.
+                  Note: URL extraction feature is coming soon.
                 </p>
               </div>
             </TabsContent>
 
+            {/* ✅ FIXED PDF TAB */}
             <TabsContent value="pdf" className="space-y-4">
               <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
-                <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">
-                  PDF upload feature coming soon
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  For now, please copy and paste the PDF text content in the Text
-                  tab.
-                </p>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handlePDFUpload}
+                  className="hidden"
+                  id="pdf-upload"
+                />
+                <Label
+                  htmlFor="pdf-upload"
+                  className="cursor-pointer flex flex-col items-center"
+                >
+                  <Upload className="w-12 h-12 mb-3 text-muted-foreground" />
+                  <span className="font-medium">
+                    {pdfName || "Click to upload a PDF"}
+                  </span>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Supported: standard text-based PDFs
+                  </p>
+                </Label>
               </div>
             </TabsContent>
 
+            {/* YOUTUBE TAB */}
             <TabsContent value="youtube" className="space-y-4">
               <div>
                 <Label htmlFor="youtube-input">Enter YouTube video URL</Label>
@@ -163,11 +214,9 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
                   onChange={(e) => setInputText(e.target.value)}
                   placeholder="https://youtube.com/watch?v=..."
                   className="min-h-[100px] resize-none"
-                  data-testid="input-youtube-summarize"
                 />
                 <p className="text-sm text-muted-foreground mt-2">
-                  Note: YouTube transcript extraction is coming soon. For now,
-                  please provide the video transcript text.
+                  Note: YouTube transcript extraction is coming soon.
                 </p>
               </div>
             </TabsContent>
@@ -183,22 +232,17 @@ export function SummarizerModal({ open, onOpenChange }: SummarizerModalProps) {
           )}
 
           <div className="flex justify-end space-x-3">
-            <Button
-              variant="outline"
-              onClick={handleReset}
-              data-testid="button-reset-summarizer"
-            >
+            <Button variant="outline" onClick={handleReset}>
               Reset
             </Button>
             <Button
               onClick={handleSummarize}
               disabled={loading || !inputText.trim()}
-              data-testid="button-generate-summary"
             >
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generating...
+                  Processing...
                 </>
               ) : (
                 "Generate Summary"
