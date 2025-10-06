@@ -7,7 +7,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
 
@@ -30,79 +29,48 @@ export default function Summarizer() {
     }
   };
 
-  const handleSummarize = async () => {
-    if (!inputText.trim()) {
-      toast({
-        title: "Input required",
-        description: "Please enter text, a URL, YouTube link, or PDF content to summarize.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setLoading(true);
-    setSummary("");
-    setErrorMsg("");
-
-    try {
-      const body: Record<string, any> = {};
-      if (activeTab === "text" || activeTab === "pdf") body.text = inputText;
-      if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
-
-      const raw = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
-      const { parsed } = await parseApiResult(raw);
-
-      const summaryText =
-        parsed?.summary ?? parsed?.result ?? parsed?.message ?? parsed?.data?.summary ?? "";
-
-      if (summaryText.trim()) {
-        setSummary(summaryText.trim());
-        toast({ title: "Summary generated!", description: "Your content has been successfully summarized" });
-      } else {
-        throw new Error(parsed?.error || parsed?.message || "Invalid response from server");
-      }
-    } catch (error: any) {
-      console.error("Summarizer error:", error);
-      setErrorMsg(error?.message || "Failed to generate summary");
-      toast({ title: "Error", description: error?.message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReset = () => {
-    setInputText("");
-    setSummary("");
-    setErrorMsg("");
-    setPdfUploaded(false);
-  };
-
-  // ✅ Real PDF extraction via backend API
+  // ---------------- PDF Upload & Extract ----------------
   const handlePdfUpload = async (file: File) => {
     try {
       setLoading(true);
       const formData = new FormData();
       formData.append("file", file);
 
-      const raw = await fetch("/api/extract-pdf", {
-        method: "POST",
-        body: formData,
-      });
-
+      const raw = await fetch("/api/extract-pdf", { method: "POST", body: formData });
       const { parsed } = await parseApiResult(raw);
 
       if (parsed?.text) {
         setInputText(parsed.text);
         setPdfUploaded(true);
-        toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
+        toast({ title: "PDF loaded", description: "Text extracted successfully" });
       } else {
-        throw new Error(parsed?.error || "Failed to extract text from PDF");
+        throw new Error(parsed?.error || "PDF extraction failed");
       }
     } catch (err: any) {
-      console.error("PDF upload error:", err);
       toast({ title: "Error", description: err?.message || "PDF extraction failed", variant: "destructive" });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ---------------- Download Summary as PDF ----------------
+  const handleDownloadPdf = async () => {
+    try {
+      if (!summary.trim()) throw new Error("No summary to download");
+      const raw = await fetch("/api/download-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: summary }),
+      });
+      const blob = await raw.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "summary.pdf";
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Failed to download PDF", variant: "destructive" });
     }
   };
 
@@ -117,11 +85,8 @@ export default function Summarizer() {
     e.stopPropagation();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type === "application/pdf") {
-      handlePdfUpload(file);
-    } else {
-      toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
-    }
+    if (file && file.type === "application/pdf") handlePdfUpload(file);
+    else toast({ title: "Invalid file", description: "Upload a valid PDF", variant: "destructive" });
   };
 
   return (
@@ -142,73 +107,44 @@ export default function Summarizer() {
               <TabsTrigger value="youtube"><Youtube className="w-4 h-4 mr-2" />YouTube</TabsTrigger>
             </TabsList>
 
-            <div className="mt-6">
-              <TabsContent value="text">
-                <Label>Enter text to summarize</Label>
-                <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} className="min-h-[300px]" />
-              </TabsContent>
-
-              <TabsContent value="pdf">
-                <motion.div
-                  onDragEnter={(e) => handleDrag(e, true)}
-                  onDragOver={(e) => handleDrag(e, true)}
-                  onDragLeave={(e) => handleDrag(e, false)}
-                  onDrop={handleDrop}
-                  className={`border-2 border-dashed rounded-2xl p-12 text-center ${
-                    isDragging ? "border-primary bg-primary/10" :
-                    pdfUploaded ? "border-green-500 bg-green-50" :
-                    "border-border hover:border-primary/70 hover:bg-muted/50"
-                  }`}
-                  onClick={() => document.getElementById("pdf-upload-input")?.click()}
-                >
-                  {pdfUploaded ? (
-                    <CheckCircle className="w-16 h-16 mx-auto mb-4 text-green-500" />
-                  ) : (
-                    <Upload className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-                  )}
-                  <h3 className="font-semibold mb-2">
-                    {pdfUploaded ? "PDF Uploaded Successfully!" : "Drag & Drop or Click to Upload PDF"}
-                  </h3>
-                  <input
-                    id="pdf-upload-input"
-                    type="file"
-                    accept="application/pdf"
-                    onChange={(e) => e.target.files && handlePdfUpload(e.target.files[0])}
-                    className="hidden"
-                  />
-                </motion.div>
-              </TabsContent>
-
-              <TabsContent value="url">
-                <Label>Enter article URL</Label>
-                <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} className="min-h-[150px]" />
-              </TabsContent>
-
-              <TabsContent value="youtube">
-                <Label>Enter YouTube video URL</Label>
-                <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} className="min-h-[150px]" />
-              </TabsContent>
-            </div>
+            <TabsContent value="pdf">
+              <motion.div
+                onDragEnter={(e) => handleDrag(e, true)}
+                onDragOver={(e) => handleDrag(e, true)}
+                onDragLeave={(e) => handleDrag(e, false)}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-2xl p-12 text-center ${
+                  isDragging ? "border-primary bg-primary/10" :
+                  pdfUploaded ? "border-green-500 bg-green-50" :
+                  "border-border hover:border-primary/70 hover:bg-muted/50"
+                }`}
+                onClick={() => document.getElementById("pdf-upload-input")?.click()}
+              >
+                {pdfUploaded ? (
+                  <CheckCircle className="w-16 h-16 mx-auto mb-4 text-green-500" />
+                ) : (
+                  <Upload className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                )}
+                <h3 className="font-semibold mb-2">
+                  {pdfUploaded ? "PDF Uploaded Successfully!" : "Drag & Drop or Click to Upload PDF"}
+                </h3>
+                <input
+                  id="pdf-upload-input"
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => e.target.files && handlePdfUpload(e.target.files[0])}
+                  className="hidden"
+                />
+              </motion.div>
+            </TabsContent>
           </Tabs>
 
-          <div className="flex justify-end space-x-3 mt-6">
-            <Button variant="outline" onClick={handleReset}>Reset</Button>
-            <Button onClick={handleSummarize} disabled={loading || !inputText.trim()}>
-              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating...</> : "Generate Summary"}
-            </Button>
-          </div>
-        </Card>
-
-        {(summary || errorMsg) && (
-          <Card className="p-6 mt-6">
-            <h2 className="text-xl font-semibold mb-4">Summary:</h2>
-            <div className="bg-muted p-4 rounded-lg">
-              <p className="whitespace-pre-wrap text-muted-foreground">
-                {summary || `⚠️ ${errorMsg}`}
-              </p>
+          {summary && (
+            <div className="flex justify-end mt-4">
+              <Button onClick={handleDownloadPdf}>Download Summary PDF</Button>
             </div>
-          </Card>
-        )}
+          )}
+        </Card>
       </div>
       <Footer />
     </div>
