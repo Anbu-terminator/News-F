@@ -6,6 +6,7 @@ import { storage } from "./storage";
 import { insertUserSchema, insertCommentSchema, insertLikeSchema, insertBookmarkSchema } from "@shared/schema";
 import { summarizeText, detectFakeNews, chatWithAI } from "./services/openai";
 import { fetchNews, searchNews } from "./services/newsapi";
+import { PDFDocument } from "pdf-lib";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0.KMUFsIDTnFmyG3nMiGM6H9FNFUROf3wh7SmqJp-QV30";
 
@@ -137,8 +138,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // (Optional) If you later support file uploads for PDF summarization, ensure multer is used and you return { summary }
-  // app.post("/api/summarize/pdf", upload.single("file"), async (req, res) => { ... });
+ // ---------------- PDF Summarization ----------------
+  const pdfUploadDir = path.join(process.cwd(), "public", "uploads");
+  if (!fs.existsSync(pdfUploadDir)) fs.mkdirSync(pdfUploadDir, { recursive: true });
+
+  app.post("/api/summarize/pdf", async (req, res) => {
+    try {
+      const form = new formidable.IncomingForm({ uploadDir: pdfUploadDir, keepExtensions: true });
+      form.parse(req, async (err, fields, files: any) => {
+        if (err) return res.status(500).json({ summary: "", error: "File upload failed" });
+
+        const file = files.file;
+        if (!file) return res.status(400).json({ summary: "", error: "No PDF file uploaded" });
+
+        const filePath = file.filepath || file.path;
+        const fileBuffer = fs.readFileSync(filePath);
+
+        let extractedText = "";
+        try {
+          const pdfDoc = await PDFDocument.load(fileBuffer);
+          const pages = pdfDoc.getPages();
+          extractedText = pages.map(p => p.getTextContent?.()).join("\n") || "";
+        } catch {
+          extractedText = "";
+        }
+
+        if (extractedText.trim().length > 0) {
+          const summary = await summarizeText(extractedText, "pdf");
+          res.json({ summary });
+        } else {
+          const fileName = path.basename(filePath);
+          const pdfUrl = `/uploads/${fileName}`;
+          res.json({ summary: "", pdfUrl });
+        }
+      });
+    } catch (error: any) {
+      console.error("PDF Summarize handler error:", error);
+      res.status(500).json({ summary: "", error: error.message || "Failed to process PDF" });
+    }
+  });
 
   // Fake news check
   app.post("/api/fakecheck", async (req, res) => {
