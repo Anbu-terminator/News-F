@@ -10,7 +10,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
-import * as pdfjsLib from "pdfjs-dist/webpack"; // ✅ browser-compatible
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -78,13 +77,14 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ Real PDF extraction in browser
+  // ✅ Browser PDF extraction (dynamic import avoids Vite build issues)
   const extractPdfText = async (file: File) => {
     try {
+      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf");
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      let fullText = "";
 
+      let fullText = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
@@ -103,6 +103,7 @@ export default function Summarizer() {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
+
     const file = e.dataTransfer.files?.[0];
     if (file && file.type === "application/pdf") {
       try {
