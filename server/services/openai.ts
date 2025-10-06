@@ -1,15 +1,10 @@
 import fs from "fs";
 import axios from "axios";
+import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import * as pdfjs from "pdfjs-dist"; // ✅ Node ESM compatible import
-import pdfjsNode from "pdfjs-dist/build/pdf.js";
-
-// Fix for Node environment
-(pdfjs as any).GlobalWorkerOptions = {
-  workerSrc: `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`,
-};
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js"; // ✅ Node ESM safe
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
@@ -25,12 +20,18 @@ export const client = new OpenAI({
 // -------------------- LOCAL RULE-BASED SUMMARIZER --------------------
 export function ruleBasedTextSummarizer(text: string): string {
   try {
-    const sentences = text.split(/[.!?]/).map((s) => s.trim()).filter(Boolean);
+    const sentences = text
+      .split(/[.!?]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (sentences.length <= 3) return text;
-
     const summaryCount = Math.min(4, sentences.length);
-    const summaryIndices = [0, Math.floor(sentences.length / 3), Math.floor((2 * sentences.length) / 3), sentences.length - 1].slice(0, summaryCount);
-
+    const summaryIndices = [
+      0,
+      Math.floor(sentences.length / 3),
+      Math.floor((2 * sentences.length) / 3),
+      sentences.length - 1,
+    ].slice(0, summaryCount);
     return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
   } catch (err) {
     console.error("Rule summarizer error:", err);
@@ -38,7 +39,7 @@ export function ruleBasedTextSummarizer(text: string): string {
   }
 }
 
-// -------------------- PDF READER --------------------
+// -------------------- PDF READER (Node-safe) --------------------
 export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
   try {
     let data: Uint8Array;
@@ -48,7 +49,7 @@ export async function readPdfContent(pdfInput: Buffer | string): Promise<string>
       data = new Uint8Array(pdfInput);
     }
 
-    const loadingTask = pdfjsNode.getDocument({ data });
+    const loadingTask = pdfjsLib.getDocument({ data }); // ✅ no worker config needed in Node
     const pdf = await loadingTask.promise;
 
     let fullText = "";
@@ -97,7 +98,6 @@ export async function summarizeText(
 
       const textContent: string = await page.evaluate(() => document.body.innerText || "");
       await browser.close();
-
       const cleanedText = textContent.replace(/\s+/g, " ").trim();
       if (!cleanedText) return "Failed to extract text from webpage.";
       return ruleBasedTextSummarizer(cleanedText);
@@ -124,6 +124,7 @@ export async function summarizeText(
     return "Summarization failed due to internal error.";
   }
 }
+
 // -------------------- CHATBOT --------------------
 export async function chatWithAI(message: string, context?: string): Promise<string> {
   try {
