@@ -1,4 +1,4 @@
-import { useState, ChangeEvent, DragEvent } from "react";
+import { useState, DragEvent } from "react";
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
@@ -10,8 +10,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf";
 
-// Removed pdfjs-dist import to fix Vite/Rollup build error
+// Use PDF.js CDN for worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js`;
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -23,7 +25,7 @@ export default function Summarizer() {
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const { toast } = useToast();
 
-  const parseApiResult = async (res: any) => {
+  const parseApiResult = async (res: Response) => {
     try {
       const parsed = await res.json();
       return { parsed, status: res.status };
@@ -54,14 +56,13 @@ export default function Summarizer() {
       const raw = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
       const { parsed } = await parseApiResult(raw);
 
-      const summaryText =
-        parsed?.summary ?? parsed?.result ?? parsed?.message ?? parsed?.data?.summary ?? "";
-
-      if (summaryText.trim()) {
+      // Handle backend response safely
+      const summaryText = parsed?.summary ?? parsed?.result ?? "";
+      if (summaryText) {
         setSummary(summaryText.trim());
         toast({ title: "Summary generated!", description: "Your content has been successfully summarized" });
       } else {
-        throw new Error(parsed?.error || parsed?.message || "Invalid response from server");
+        throw new Error(parsed?.message || "Invalid response from server");
       }
     } catch (error: any) {
       console.error("Summarizer error:", error);
@@ -79,26 +80,28 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ Browser-compatible PDF text extraction
   const extractPdfText = async (file: File) => {
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      // Minimal placeholder for browser-safe PDF extraction
-      // You can replace this with server-side extraction if needed
-      return "PDF uploaded. (Text extraction simulated for browser safety)";
-    } catch {
-      return "";
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map((item: any) => item.str);
+      text += strings.join(" ") + "\n";
     }
+    return text.trim();
   };
 
   const handlePdfUpload = async (file: File) => {
     try {
       const text = await extractPdfText(file);
+      if (!text) throw new Error("No text found in PDF");
       setInputText(text);
       setPdfUploaded(true);
       toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
-    } catch (err) {
-      toast({ title: "Error", description: "Failed to extract text from PDF", variant: "destructive" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Failed to extract text from PDF", variant: "destructive" });
     }
   };
 
