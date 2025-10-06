@@ -1,10 +1,9 @@
 import fs from "fs";
 import axios from "axios";
-import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import extract from "pdf-text-extract"; // ✅ Accurate PDF text extraction
+import { PDFDocument } from "pdf-lib";
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
@@ -33,37 +32,28 @@ export function ruleBasedTextSummarizer(text: string): string {
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- FIXED PDF READER USING pdf-text-extract --------------------
+// -------------------- PDF READER USING PDF-LIB --------------------
 export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
-      const tempPath = "./temp.pdf";
+  try {
+    const buffer = typeof pdfInput === "string" ? Buffer.from(pdfInput, "base64") : pdfInput;
+    const pdfDoc = await PDFDocument.load(buffer);
+    const pages = pdfDoc.getPages();
 
-      // ✅ Handle base64 or buffer input
-      const buffer = typeof pdfInput === "string" ? Buffer.from(pdfInput, "base64") : pdfInput;
-      fs.writeFileSync(tempPath, buffer);
-
-      // ✅ Extract text from PDF
-      extract(tempPath, (err: any, pages: string[]) => {
-        fs.unlinkSync(tempPath); // cleanup temp file
-        if (err) {
-          console.error("PDF extraction error:", err);
-          reject("Failed to read PDF file.");
-          return;
+    const text = pages
+      .map((page) => {
+        try {
+          return page.getTextContent?.()?.items?.map((i: any) => i.str).join(" ") || "";
+        } catch {
+          return "";
         }
+      })
+      .join("\n\n");
 
-        const text = pages.join("\n\n").trim();
-        if (!text || text.length === 0) {
-          resolve("No readable text found in PDF.");
-        } else {
-          resolve(text);
-        }
-      });
-    } catch (err: any) {
-      console.error("PDF read error:", err.message || err);
-      reject("Failed to read PDF file.");
-    }
-  });
+    return text.trim() || "No readable text found in PDF.";
+  } catch (err) {
+    console.error("PDF read error:", err);
+    return "Failed to read PDF file.";
+  }
 }
 
 // -------------------- SUMMARIZER ENTRY --------------------
@@ -76,9 +66,7 @@ export async function summarizeText(
 
     if (type === "pdf") {
       const pdfText = await readPdfContent(input);
-      if (!pdfText || pdfText.trim().length === 0) {
-        return "No readable text extracted from the PDF.";
-      }
+      if (!pdfText || pdfText.trim().length === 0) return "No readable text extracted from the PDF.";
       return ruleBasedTextSummarizer(pdfText);
     }
 
@@ -89,17 +77,11 @@ export async function summarizeText(
         executablePath: await chromium.executablePath(),
         headless: true,
       });
-
       const page = await browser.newPage();
       await page.goto(input, { waitUntil: "domcontentloaded", timeout: 60000 });
-
-      await page.evaluate(() => {
-        Array.from(document.querySelectorAll("script, style, noscript, iframe")).forEach((el) => el.remove());
-      });
-
+      await page.evaluate(() => Array.from(document.querySelectorAll("script, style, noscript, iframe")).forEach((el) => el.remove()));
       const textContent: string = await page.evaluate(() => document.body.innerText || "");
       await browser.close();
-
       const cleanedText = textContent.replace(/\s+/g, " ").trim();
       return cleanedText ? ruleBasedTextSummarizer(cleanedText) : "Failed to extract text from webpage.";
     }
@@ -107,13 +89,11 @@ export async function summarizeText(
     if (type === "youtube" && typeof input === "string") {
       const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?&]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
-
       const videoId = videoIdMatch[1];
       const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
       const response = await axios.get(url);
       const snippet = response.data?.items?.[0]?.snippet;
       if (!snippet) return "Video not found.";
-
       const textToSummarize = `${snippet.title || ""}. ${snippet.description || ""}`;
       return ruleBasedTextSummarizer(textToSummarize);
     }
@@ -124,6 +104,7 @@ export async function summarizeText(
     return "Summarization failed due to internal error.";
   }
 }
+
 // -------------------- CHATBOT --------------------
 export async function chatWithAI(message: string, context?: string): Promise<string> {
   try {
