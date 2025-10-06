@@ -27,7 +27,17 @@ export default defineConfig(async () => {
       outDir: path.resolve(import.meta.dirname, "dist/public"),
       emptyOutDir: true,
       rollupOptions: {
-        external: ["pdfjs-dist"], // ✅ prevent Rollup from trying to bundle it
+        // ✅ Prevent Rollup from bundling pdfjs-dist worker
+        external: ["pdfjs-dist/legacy/build/pdf.worker.entry"],
+        output: {
+          // ✅ Keep worker file name consistent for import
+          assetFileNames: (assetInfo) => {
+            if (assetInfo.name?.endsWith("pdf.worker.entry.js")) {
+              return "assets/[name][extname]";
+            }
+            return "assets/[name]-[hash][extname]";
+          },
+        },
       },
     },
     server: {
