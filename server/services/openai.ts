@@ -4,7 +4,8 @@ import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
-import { PDFParser } from "pdf2json";
+import pkg from "pdf2json"; // ✅ FIXED IMPORT for CommonJS module
+const { PDFParser } = pkg;
 
 // -------------------- CONFIG --------------------
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
@@ -40,8 +41,8 @@ export function readPdfContent(pdfInput: Buffer | string): Promise<string> {
       const pdfParser = new PDFParser();
       pdfParser.on("pdfParser_dataError", (err) => reject(err.parserError));
       pdfParser.on("pdfParser_dataReady", (pdfData) => {
-        const text = pdfData.formImage.Pages.map(page =>
-          page.Texts.map(item => decodeURIComponent(item.R[0].T)).join(" ")
+        const text = pdfData.formImage.Pages.map((page: any) =>
+          page.Texts.map((item: any) => decodeURIComponent(item.R[0].T)).join(" ")
         ).join("\n\n");
         resolve(text.trim() || "No readable text found in PDF.");
       });
@@ -82,7 +83,7 @@ export async function summarizeText(
       const page = await browser.newPage();
       await page.goto(input, { waitUntil: "domcontentloaded", timeout: 60000 });
       await page.evaluate(() => {
-        Array.from(document.querySelectorAll("script, style, noscript, iframe")).forEach(el => el.remove());
+        Array.from(document.querySelectorAll("script, style, noscript, iframe")).forEach((el) => el.remove());
       });
       const textContent: string = await page.evaluate(() => document.body.innerText || "");
       await browser.close();
@@ -110,7 +111,6 @@ export async function summarizeText(
     return "Summarization failed due to internal error.";
   }
 }
-
 // -------------------- CHATBOT --------------------
 export async function chatWithAI(message: string, context?: string): Promise<string> {
   try {
