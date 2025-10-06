@@ -1,5 +1,4 @@
 import fs from "fs";
-import { PDFDocument } from "pdf-lib";
 import axios from "axios";
 import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
@@ -42,24 +41,27 @@ export function ruleBasedTextSummarizer(text: string): string {
   }
 }
 
-// -------------------- PDF READER (Local) USING PDF-LIB --------------------
-export async function readPdfContent(pdfBuffer: Buffer): Promise<string> {
+// -------------------- PDF SUMMARIZER (Server-Side) --------------------
+export async function summarizePdfBuffer(pdfBuffer: Buffer): Promise<string> {
   try {
-    const pdfDoc = await PDFDocument.load(pdfBuffer);
-    const pageCount = pdfDoc.getPageCount();
-    let text = `Extracted text from ${pageCount} pages:\n\n`;
+    // Dynamic import of pdfjs-dist (server-side only)
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf");
+    const pdf = await pdfjs.getDocument({ data: pdfBuffer }).promise;
 
-    // pdf-lib doesn't natively extract text, simulate simple extraction
-    for (let i = 0; i < pageCount; i++) {
-      text += `Page ${i + 1}: [Text extraction simulated]\n`;
+    let fullText = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      fullText += content.items.map((item: any) => item.str).join(" ") + "\n\n";
     }
 
-    return text || "No readable text found in PDF.";
+    return ruleBasedTextSummarizer(fullText);
   } catch (err: any) {
-    console.error("PDF read error:", err.message || err);
-    return "Failed to read PDF file.";
+    console.error("PDF summarization error:", err.message || err);
+    return "Failed to summarize PDF.";
   }
 }
+
 
 // -------------------- SUMMARIZER ENTRY --------------------
 export async function summarizeText(
