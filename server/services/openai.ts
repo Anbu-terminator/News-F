@@ -18,7 +18,10 @@ export const client = new OpenAI({
 
 // -------------------- RULE-BASED SUMMARIZER --------------------
 export function ruleBasedTextSummarizer(text: string): string {
-  const sentences = text.split(/[.!?]/).map((s) => s.trim()).filter(Boolean);
+  const sentences = text
+    .split(/[.!?]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (sentences.length <= 3) return text;
 
   const summaryCount = Math.min(4, sentences.length);
@@ -39,16 +42,16 @@ export async function readPdfContent(pdfInput: Buffer | string): Promise<string>
     const pdfDoc = await PDFDocument.load(buffer);
     const pages = pdfDoc.getPages();
 
-    // Simple workaround: Extract all text objects
     let fullText = "";
+
     for (const page of pages) {
-      const contentStream = page.getContentStream?.();
-      if (contentStream) {
-        fullText += contentStream.toString() + "\n";
+      // Extract text items from page
+      const { textItems } = await (page as any).getTextContent?.() ?? { textItems: [] };
+      if (textItems && textItems.length > 0) {
+        fullText += textItems.map((item: any) => item.str).join(" ") + "\n";
       }
     }
 
-    // Fallback if no text found
     if (!fullText.trim()) return "No readable text found in PDF.";
 
     return fullText.replace(/\s+/g, " ").trim();
@@ -91,7 +94,7 @@ export async function summarizeText(
       if (!videoIdMatch) return "Invalid YouTube URL.";
       const videoId = videoIdMatch[1];
       const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
-      const response = await (await import("axios")).default.get(url);
+      const response = await axios.get(url);
       const snippet = response.data?.items?.[0]?.snippet;
       if (!snippet) return "Video not found.";
       const textToSummarize = `${snippet.title || ""}. ${snippet.description || ""}`;
