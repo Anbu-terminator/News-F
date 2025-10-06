@@ -17,47 +17,40 @@ export const client = new OpenAI({
   apiKey: HUGGINGFACE_API_KEY,
 });
 
-// -------------------- LOCAL RULE-BASED SUMMARIZER --------------------
+// -------------------- RULE-BASED SUMMARIZER --------------------
 export function ruleBasedTextSummarizer(text: string): string {
-  try {
-    const sentences = text
-      .split(/[.!?]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (sentences.length <= 3) return text;
-    const summaryCount = Math.min(4, sentences.length);
-    const summaryIndices = [
-      0,
-      Math.floor(sentences.length / 3),
-      Math.floor((2 * sentences.length) / 3),
-      sentences.length - 1,
-    ].slice(0, summaryCount);
-    return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
-  } catch (err) {
-    console.error("Rule summarizer error:", err);
-    return "Failed to summarize text.";
-  }
+  const sentences = text
+    .split(/[.!?]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (sentences.length <= 3) return text;
+
+  const summaryCount = Math.min(4, sentences.length);
+  const summaryIndices = [
+    0,
+    Math.floor(sentences.length / 3),
+    Math.floor((2 * sentences.length) / 3),
+    sentences.length - 1,
+  ].slice(0, summaryCount);
+
+  return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- PDF READER (Node-safe) --------------------
+// -------------------- PDF READER --------------------
 export async function readPdfContent(pdfInput: Buffer | string): Promise<string> {
   try {
-    let data: Uint8Array;
-    if (typeof pdfInput === "string") {
-      data = new Uint8Array(Buffer.from(pdfInput, "base64"));
-    } else {
-      data = new Uint8Array(pdfInput);
-    }
+    const data = typeof pdfInput === "string"
+      ? new Uint8Array(Buffer.from(pdfInput, "base64"))
+      : new Uint8Array(pdfInput);
 
-    const loadingTask = pdfjsLib.getDocument({ data }); // ✅ no worker config needed in Node
-    const pdf = await loadingTask.promise;
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
 
     let fullText = "";
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map((item: any) => ("str" in item ? item.str : "")).join(" ");
-      fullText += pageText + "\n\n";
+      fullText += content.items.map((item: any) => ("str" in item ? item.str : "")).join(" ") + "\n\n";
     }
 
     return fullText.trim() || "No readable text found in PDF.";
@@ -76,7 +69,6 @@ export async function summarizeText(
     if (type === "text" && typeof input === "string") return ruleBasedTextSummarizer(input);
 
     if (type === "pdf") {
-      console.log("📄 Summarizing PDF...");
       const pdfText = await readPdfContent(input);
       return ruleBasedTextSummarizer(pdfText);
     }
@@ -98,22 +90,21 @@ export async function summarizeText(
 
       const textContent: string = await page.evaluate(() => document.body.innerText || "");
       await browser.close();
+
       const cleanedText = textContent.replace(/\s+/g, " ").trim();
-      if (!cleanedText) return "Failed to extract text from webpage.";
-      return ruleBasedTextSummarizer(cleanedText);
+      return cleanedText ? ruleBasedTextSummarizer(cleanedText) : "Failed to extract text from webpage.";
     }
 
     if (type === "youtube" && typeof input === "string") {
       const videoIdMatch = input.match(/v=([^&]+)/) || input.match(/youtu\.be\/([^?&]+)/);
       if (!videoIdMatch) return "Invalid YouTube URL.";
-      const videoId = videoIdMatch[1];
 
+      const videoId = videoIdMatch[1];
       const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`;
       const response = await axios.get(url);
-      const items = response.data?.items;
-      if (!items || items.length === 0) return "Video not found.";
+      const snippet = response.data?.items?.[0]?.snippet;
+      if (!snippet) return "Video not found.";
 
-      const snippet = items[0].snippet || {};
       const textToSummarize = `${snippet.title || ""}. ${snippet.description || ""}`;
       return ruleBasedTextSummarizer(textToSummarize);
     }
@@ -124,6 +115,7 @@ export async function summarizeText(
     return "Summarization failed due to internal error.";
   }
 }
+
 
 // -------------------- CHATBOT --------------------
 export async function chatWithAI(message: string, context?: string): Promise<string> {
