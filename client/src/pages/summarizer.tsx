@@ -1,4 +1,7 @@
-import { useState, ChangeEvent, DragEvent } from "react";
+import { useState, DragEvent } from "react";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.js?url";
+
 import { motion } from "framer-motion";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
@@ -7,11 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
+import { apiRequest } from "@/lib/api";
 
-// Removed pdfjs-dist import to fix Vite/Rollup build error
+// ✅ Set pdf.js worker dynamically for Vite
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -79,16 +83,18 @@ export default function Summarizer() {
     setPdfUploaded(false);
   };
 
-  // ✅ Browser-compatible PDF text extraction
+  // ✅ Real PDF text extraction
   const extractPdfText = async (file: File) => {
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      // Minimal placeholder for browser-safe PDF extraction
-      // You can replace this with server-side extraction if needed
-      return "PDF uploaded. (Text extraction simulated for browser safety)";
-    } catch {
-      return "";
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    let textContent = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const txt = await page.getTextContent();
+      textContent += txt.items.map((item: any) => item.str).join(" ") + "\n";
     }
+    return textContent;
   };
 
   const handlePdfUpload = async (file: File) => {
@@ -98,6 +104,7 @@ export default function Summarizer() {
       setPdfUploaded(true);
       toast({ title: "PDF loaded", description: "PDF text extracted successfully" });
     } catch (err) {
+      console.error(err);
       toast({ title: "Error", description: "Failed to extract text from PDF", variant: "destructive" });
     }
   };
