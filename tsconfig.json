@@ -11,7 +11,7 @@
     "jsx": "preserve",
 
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,   ← ✅ ADD THIS LINE
+    "allowSyntheticDefaultImports": true,  
 
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
