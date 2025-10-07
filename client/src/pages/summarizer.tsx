@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { FileText, Link, Upload, Youtube, Loader2, CheckCircle } from "lucide-react";
+import { FileText, Link, Upload, Youtube, Loader2, CheckCircle, Download } from "lucide-react";
 
 export default function Summarizer() {
   const [inputText, setInputText] = useState("");
@@ -19,6 +19,7 @@ export default function Summarizer() {
   const [activeTab, setActiveTab] = useState<"text" | "url" | "pdf" | "youtube">("text");
   const [isDragging, setIsDragging] = useState(false);
   const [pdfUploaded, setPdfUploaded] = useState<File | null>(null);
+  const [pdfDownloadLink, setPdfDownloadLink] = useState<string | null>(null);
   const { toast } = useToast();
 
   const handleSummarize = async () => {
@@ -34,10 +35,11 @@ export default function Summarizer() {
     setLoading(true);
     setSummary("");
     setErrorMsg("");
+    setPdfDownloadLink(null);
 
     try {
       if (activeTab === "pdf" && pdfUploaded) {
-        // PDF.co API integration
+        // ✅ Handle PDF summarization
         const formData = new FormData();
         formData.append("file", pdfUploaded);
 
@@ -49,11 +51,18 @@ export default function Summarizer() {
         const data = await res.json();
         if (data?.summary) {
           setSummary(data.summary);
-          toast({ title: "Summary generated!", description: "PDF summarized via PDF.co" });
+
+          // ✅ Prepare downloadable PDF link (assuming backend serves from /uploads)
+          const fileName = encodeURIComponent(pdfUploaded.name);
+          const link = `/uploads/${fileName}`;
+          setPdfDownloadLink(link);
+
+          toast({ title: "Summary generated!", description: "PDF summarized successfully" });
         } else {
           throw new Error(data?.error || "Failed to summarize PDF");
         }
       } else {
+        // ✅ Handle text / URL / YouTube summarization
         const body: Record<string, any> = {};
         if (activeTab === "text") body.text = inputText;
         else if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
@@ -83,6 +92,7 @@ export default function Summarizer() {
     setSummary("");
     setErrorMsg("");
     setPdfUploaded(null);
+    setPdfDownloadLink(null);
   };
 
   const handlePdfUpload = (file: File) => {
@@ -136,7 +146,7 @@ export default function Summarizer() {
                   onDragOver={(e) => handleDrag(e, true)}
                   onDragLeave={(e) => handleDrag(e, false)}
                   onDrop={handleDrop}
-                  className={`border-2 border-dashed rounded-2xl p-12 text-center ${
+                  className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer ${
                     isDragging ? "border-primary bg-primary/10" :
                     pdfUploaded ? "border-green-500 bg-green-50" :
                     "border-border hover:border-primary/70 hover:bg-muted/50"
@@ -184,9 +194,22 @@ export default function Summarizer() {
         {(summary || errorMsg) && (
           <Card className="p-6 mt-6">
             <h2 className="text-xl font-semibold mb-4">Summary:</h2>
-            <div className="bg-muted p-4 rounded-lg">
+            <div className="bg-muted p-4 rounded-lg space-y-4">
               {summary ? (
-                <p className="whitespace-pre-wrap text-muted-foreground">{summary}</p>
+                <>
+                  <p className="whitespace-pre-wrap text-muted-foreground">{summary}</p>
+                  {pdfDownloadLink && (
+                    <a
+                      href={pdfDownloadLink}
+                      download
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition"
+                    >
+                      <Download className="w-4 h-4 mr-2" /> Download Uploaded PDF
+                    </a>
+                  )}
+                </>
               ) : (
                 <p className="whitespace-pre-wrap text-muted-foreground">⚠️ {errorMsg}</p>
               )}
