@@ -7,7 +7,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle, Download } from "lucide-react";
 
@@ -22,68 +21,28 @@ export default function Summarizer() {
   const [pdfDownloadLink, setPdfDownloadLink] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const handleSummarize = async () => {
-    if ((!inputText.trim() && activeTab !== "pdf") || (activeTab === "pdf" && !pdfUploaded)) {
+  const handleGenerate = async () => {
+    if (activeTab === "pdf" && pdfUploaded) {
+      setLoading(true);
+      try {
+        // Create local download link
+        const link = URL.createObjectURL(pdfUploaded);
+        setPdfDownloadLink(link);
+        setSummary("Your uploaded PDF is ready for download below.");
+        toast({ title: "PDF ready", description: "Uploaded PDF is available for download." });
+      } catch (err: any) {
+        console.error("PDF handling error:", err);
+        setErrorMsg("Failed to process PDF.");
+        toast({ title: "Error", description: "Failed to process PDF", variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
+    } else {
       toast({
-        title: "Input required",
-        description: "Please enter text, a URL, YouTube link, or upload a PDF to summarize.",
+        title: "Upload required",
+        description: "Please upload a PDF file to generate a downloadable link.",
         variant: "destructive",
       });
-      return;
-    }
-
-    setLoading(true);
-    setSummary("");
-    setErrorMsg("");
-    setPdfDownloadLink(null);
-
-    try {
-      if (activeTab === "pdf" && pdfUploaded) {
-        // ✅ Handle PDF summarization
-        const formData = new FormData();
-        formData.append("file", pdfUploaded);
-
-        const res = await fetch("/api/summarize/pdf", {
-          method: "POST",
-          body: formData,
-        });
-
-        const data = await res.json();
-        if (data?.summary) {
-          setSummary(data.summary);
-
-          // ✅ Prepare downloadable PDF link (assuming backend serves from /uploads)
-          const fileName = encodeURIComponent(pdfUploaded.name);
-          const link = `/uploads/${fileName}`;
-          setPdfDownloadLink(link);
-
-          toast({ title: "Summary generated!", description: "PDF summarized successfully" });
-        } else {
-          throw new Error(data?.error || "Failed to summarize PDF");
-        }
-      } else {
-        // ✅ Handle text / URL / YouTube summarization
-        const body: Record<string, any> = {};
-        if (activeTab === "text") body.text = inputText;
-        else if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
-
-        const res = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
-        const data = await res.json();
-
-        const summaryText = data?.summary ?? data?.result ?? data?.message ?? "";
-        if (summaryText.trim()) {
-          setSummary(summaryText.trim());
-          toast({ title: "Summary generated!", description: "Content successfully summarized" });
-        } else {
-          throw new Error(data?.error || "Invalid response from server");
-        }
-      }
-    } catch (err: any) {
-      console.error("Summarizer error:", err);
-      setErrorMsg(err?.message || "Failed to generate summary");
-      toast({ title: "Error", description: err?.message, variant: "destructive" });
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -121,8 +80,10 @@ export default function Summarizer() {
       <Header />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold mb-4">AI Article Summarizer</h1>
-          <p className="text-lg text-muted-foreground">Summarize articles, PDFs, or YouTube videos with AI</p>
+          <h1 className="text-3xl font-bold mb-4">PDF Uploader</h1>
+          <p className="text-lg text-muted-foreground">
+            Upload a PDF and instantly get a downloadable link.
+          </p>
         </div>
 
         <Card className="p-6">
@@ -135,11 +96,6 @@ export default function Summarizer() {
             </TabsList>
 
             <div className="mt-6">
-              <TabsContent value="text">
-                <Label>Enter text to summarize</Label>
-                <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} className="min-h-[300px]" />
-              </TabsContent>
-
               <TabsContent value="pdf">
                 <motion.div
                   onDragEnter={(e) => handleDrag(e, true)}
@@ -147,9 +103,11 @@ export default function Summarizer() {
                   onDragLeave={(e) => handleDrag(e, false)}
                   onDrop={handleDrop}
                   className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer ${
-                    isDragging ? "border-primary bg-primary/10" :
-                    pdfUploaded ? "border-green-500 bg-green-50" :
-                    "border-border hover:border-primary/70 hover:bg-muted/50"
+                    isDragging
+                      ? "border-primary bg-primary/10"
+                      : pdfUploaded
+                      ? "border-green-500 bg-green-50"
+                      : "border-border hover:border-primary/70 hover:bg-muted/50"
                   }`}
                   onClick={() => document.getElementById("pdf-upload-input")?.click()}
                 >
@@ -170,38 +128,34 @@ export default function Summarizer() {
                   />
                 </motion.div>
               </TabsContent>
-
-              <TabsContent value="url">
-                <Label>Enter article URL</Label>
-                <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} className="min-h-[150px]" />
-              </TabsContent>
-
-              <TabsContent value="youtube">
-                <Label>Enter YouTube video URL</Label>
-                <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} className="min-h-[150px]" />
-              </TabsContent>
             </div>
           </Tabs>
 
           <div className="flex justify-end space-x-3 mt-6">
             <Button variant="outline" onClick={handleReset}>Reset</Button>
-            <Button onClick={handleSummarize} disabled={loading || (!inputText.trim() && !pdfUploaded)}>
-              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating...</> : "Generate Summary"}
+            <Button onClick={handleGenerate} disabled={loading || !pdfUploaded}>
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Processing...
+                </>
+              ) : (
+                "Generate Download Link"
+              )}
             </Button>
           </div>
         </Card>
 
         {(summary || errorMsg) && (
           <Card className="p-6 mt-6">
-            <h2 className="text-xl font-semibold mb-4">Summary:</h2>
+            <h2 className="text-xl font-semibold mb-4">Result:</h2>
             <div className="bg-muted p-4 rounded-lg space-y-4">
-              {summary ? (
+              {summary && (
                 <>
                   <p className="whitespace-pre-wrap text-muted-foreground">{summary}</p>
                   {pdfDownloadLink && (
                     <a
                       href={pdfDownloadLink}
-                      download
+                      download={pdfUploaded?.name || "download.pdf"}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition"
@@ -210,9 +164,8 @@ export default function Summarizer() {
                     </a>
                   )}
                 </>
-              ) : (
-                <p className="whitespace-pre-wrap text-muted-foreground">⚠️ {errorMsg}</p>
               )}
+              {errorMsg && <p className="text-red-500">{errorMsg}</p>}
             </div>
           </Card>
         )}
