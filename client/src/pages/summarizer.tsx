@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Link, Upload, Youtube, Loader2, CheckCircle, Download } from "lucide-react";
 
@@ -21,28 +22,51 @@ export default function Summarizer() {
   const [pdfDownloadLink, setPdfDownloadLink] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const handleGenerate = async () => {
-    if (activeTab === "pdf" && pdfUploaded) {
-      setLoading(true);
-      try {
-        // Create local download link
-        const link = URL.createObjectURL(pdfUploaded);
-        setPdfDownloadLink(link);
-        setSummary("Your uploaded PDF is ready for download below.");
-        toast({ title: "PDF ready", description: "Uploaded PDF is available for download." });
-      } catch (err: any) {
-        console.error("PDF handling error:", err);
-        setErrorMsg("Failed to process PDF.");
-        toast({ title: "Error", description: "Failed to process PDF", variant: "destructive" });
-      } finally {
-        setLoading(false);
-      }
-    } else {
+  const handleSummarize = async () => {
+    if ((!inputText.trim() && activeTab !== "pdf") || (activeTab === "pdf" && !pdfUploaded)) {
       toast({
-        title: "Upload required",
-        description: "Please upload a PDF file to generate a downloadable link.",
+        title: "Input required",
+        description: "Please enter text, a URL, YouTube link, or upload a PDF to summarize.",
         variant: "destructive",
       });
+      return;
+    }
+
+    setLoading(true);
+    setSummary("");
+    setErrorMsg("");
+    setPdfDownloadLink(null);
+
+    try {
+      if (activeTab === "pdf" && pdfUploaded) {
+        // ✅ Only PDF download logic (no summarization)
+        const fileURL = URL.createObjectURL(pdfUploaded);
+        setPdfDownloadLink(fileURL);
+        setSummary("Your uploaded PDF is ready for download below.");
+        toast({ title: "PDF ready", description: "Uploaded PDF available for download." });
+      } else {
+        // ✅ Keep normal summarization for Text, URL, and YouTube
+        const body: Record<string, any> = {};
+        if (activeTab === "text") body.text = inputText;
+        else if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
+
+        const res = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
+        const data = await res.json();
+
+        const summaryText = data?.summary ?? data?.result ?? data?.message ?? "";
+        if (summaryText.trim()) {
+          setSummary(summaryText.trim());
+          toast({ title: "Summary generated!", description: "Content successfully summarized." });
+        } else {
+          throw new Error(data?.error || "Invalid response from server");
+        }
+      }
+    } catch (err: any) {
+      console.error("Summarizer error:", err);
+      setErrorMsg(err?.message || "Failed to generate summary");
+      toast({ title: "Error", description: err?.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -80,9 +104,9 @@ export default function Summarizer() {
       <Header />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold mb-4">PDF Uploader</h1>
+          <h1 className="text-3xl font-bold mb-4">AI Article Summarizer</h1>
           <p className="text-lg text-muted-foreground">
-            Upload a PDF and instantly get a downloadable link.
+            Summarize text, URLs, and YouTube videos — or upload PDFs for download.
           </p>
         </div>
 
@@ -96,6 +120,17 @@ export default function Summarizer() {
             </TabsList>
 
             <div className="mt-6">
+              {/* TEXT TAB */}
+              <TabsContent value="text">
+                <Label>Enter text to summarize</Label>
+                <Textarea
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  className="min-h-[300px]"
+                />
+              </TabsContent>
+
+              {/* PDF TAB */}
               <TabsContent value="pdf">
                 <motion.div
                   onDragEnter={(e) => handleDrag(e, true)}
@@ -128,18 +163,38 @@ export default function Summarizer() {
                   />
                 </motion.div>
               </TabsContent>
+
+              {/* URL TAB */}
+              <TabsContent value="url">
+                <Label>Enter article URL</Label>
+                <Textarea
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  className="min-h-[150px]"
+                />
+              </TabsContent>
+
+              {/* YOUTUBE TAB */}
+              <TabsContent value="youtube">
+                <Label>Enter YouTube video URL</Label>
+                <Textarea
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  className="min-h-[150px]"
+                />
+              </TabsContent>
             </div>
           </Tabs>
 
           <div className="flex justify-end space-x-3 mt-6">
             <Button variant="outline" onClick={handleReset}>Reset</Button>
-            <Button onClick={handleGenerate} disabled={loading || !pdfUploaded}>
+            <Button onClick={handleSummarize} disabled={loading || (!inputText.trim() && !pdfUploaded)}>
               {loading ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Processing...
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Generating...
                 </>
               ) : (
-                "Generate Download Link"
+                "Generate Summary"
               )}
             </Button>
           </div>
@@ -147,15 +202,15 @@ export default function Summarizer() {
 
         {(summary || errorMsg) && (
           <Card className="p-6 mt-6">
-            <h2 className="text-xl font-semibold mb-4">Result:</h2>
+            <h2 className="text-xl font-semibold mb-4">Summary:</h2>
             <div className="bg-muted p-4 rounded-lg space-y-4">
-              {summary && (
+              {summary ? (
                 <>
                   <p className="whitespace-pre-wrap text-muted-foreground">{summary}</p>
                   {pdfDownloadLink && (
                     <a
                       href={pdfDownloadLink}
-                      download={pdfUploaded?.name || "download.pdf"}
+                      download={pdfUploaded?.name || "uploaded.pdf"}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition"
@@ -164,8 +219,9 @@ export default function Summarizer() {
                     </a>
                   )}
                 </>
+              ) : (
+                <p className="whitespace-pre-wrap text-red-500">⚠️ {errorMsg}</p>
               )}
-              {errorMsg && <p className="text-red-500">{errorMsg}</p>}
             </div>
           </Card>
         )}
@@ -173,4 +229,5 @@ export default function Summarizer() {
       <Footer />
     </div>
   );
-}
+                     }
+                    
