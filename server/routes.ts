@@ -54,13 +54,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const articles = await storage.getArticles(category);
       res.json(articles);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching news:", error);
-      res.status(500).json({ message: "Failed to fetch news" });
+      res.status(500).json({ message: error.message || "Failed to fetch news" });
     }
   });
 
-  // ---------------- Summarizer Routes ----------------
+  // ---------------- Text Summarizer ----------------
   app.post("/api/summarize/text", async (req, res) => {
     try {
       const { text } = req.body;
@@ -121,21 +121,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const file = files.file;
         if (!file) return res.status(400).json({ message: "No file uploaded" });
 
-        const filePath = file.filepath || file.path;
-
         try {
-          const fileBuffer = await fs.promises.readFile(filePath);
+          const fileBuffer = await fs.promises.readFile(file.filepath || file.path);
           const summary = await summarizeText(fileBuffer, "pdf");
 
           if (!summary || summary.length < 10)
             return res.status(400).json({ message: "PDF contains no readable text" });
 
           res.json({ summary });
-        } catch (pdfErr) {
+        } catch (pdfErr: any) {
           console.error("PDF extraction error:", pdfErr);
-          res.status(500).json({ message: "Failed to extract text from PDF" });
+          res.status(500).json({ message: pdfErr.message || "Failed to extract text from PDF" });
         } finally {
-          fs.unlink(filePath, () => {}); // cleanup uploaded file
+          fs.unlink(file.filepath || file.path, () => {});
         }
       });
     } catch (err: any) {
