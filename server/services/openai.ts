@@ -114,8 +114,8 @@ export async function chatWithAI(message: string, context?: string): Promise<str
   }
 }
 
-// -------------------- FAKE NEWS DETECTION --------------------
-export async function detectFakeNews(text: string): Promise<{ isReal: boolean; confidence: number; reasoning: string }> {
+// -------------------- FAKE NEWS DETECTION (Simplified) --------------------
+export async function detectFakeNews(text: string): Promise<{ isReal: boolean; reasoning: string }> {
   const trustedSources = [
     "the hindu","times of india","indian express","hindustan times","ndtv","business standard",
     "mint","economic times","deccan herald","the telegraph india","dna india","outlook india",
@@ -132,15 +132,12 @@ export async function detectFakeNews(text: string): Promise<{ isReal: boolean; c
   const lowerText = text.toLowerCase();
 
   for (const src of trustedSources) {
-    if (lowerText.includes(src)) return { isReal: true, confidence: 0.95, reasoning: `Trusted source: ${src}` };
+    if (lowerText.includes(src)) {
+      return { isReal: true, reasoning: `Content from trusted source: ${src}` };
+    }
   }
 
-  if (lowerText.includes("shocking") || lowerText.includes("breaking") || lowerText.includes("miracle"))
-    return { isReal: false, confidence: 0.3, reasoning: "Sensational language indicates possible misinformation." };
-
-  if (lowerText.length < 100) return { isReal: false, confidence: 0.4, reasoning: "Too short to verify credibility." };
-
-  return { isReal: false, confidence: 0.5, reasoning: "Source not verified against trusted list." };
+  return { isReal: false, reasoning: "Source not found in trusted list." };
 }
 
 // -------------------- YouTube Helper --------------------
