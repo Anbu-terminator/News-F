@@ -9,9 +9,12 @@ import { storage } from "./storage";
 import {
   insertUserSchema,
   insertCommentSchema,
-  insertLikeSchema,
 } from "@shared/schema";
-import { summarizeText, detectFakeNews, chatWithAI } from "./services/openai";
+import {
+  summarizeText,
+  detectFakeNews,
+  chatWithAI,
+} from "./openai";
 import { fetchNews } from "./services/newsapi";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "supersecretdefaultkey";
@@ -31,11 +34,13 @@ const authenticateToken = (req: any, res: any, next: any) => {
 
 // ---------------- Register Routes ----------------
 export async function registerRoutes(app: Express): Promise<Server> {
-  // 🌐 News Fetch
+  // 🌐 Fetch News
   app.get("/api/news", async (req, res) => {
     try {
       const { category } = req.query as { category?: string };
       const externalNews = await fetchNews(category);
+
+      // Store news in DB (skip duplicates)
       for (const article of externalNews) {
         try {
           await storage.createArticle({
@@ -52,6 +57,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // skip duplicates
         }
       }
+
       const articles = await storage.getArticles(category);
       res.json(articles);
     } catch (error: any) {
@@ -60,7 +66,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ---------------- Text Summarizer ----------------
+  // ---------------- Summarizers ----------------
+  // 🧠 Text
   app.post("/api/summarize/text", async (req, res) => {
     try {
       const { text } = req.body;
@@ -73,24 +80,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 🔗 URL
   app.post("/api/summarize/url", async (req, res) => {
     try {
-      const { url, input } = req.body;
-      const link = (url || input || "").trim();
-      if (!link) return res.status(400).json({ message: "URL is required" });
-
-      const response = await fetch(link);
-      if (!response.ok) return res.status(400).json({ message: "Unable to fetch URL" });
-      const html = await response.text();
-
-      const text = html
-        .replace(/<script[^>]*>.*?<\/script>/gs, "")
-        .replace(/<style[^>]*>.*?<\/style>/gs, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      const summary = await summarizeText(text, "link");
+      const { url } = req.body;
+      if (!url?.trim()) return res.status(400).json({ message: "URL is required" });
+      const summary = await summarizeText(url, "link");
       res.json({ summary });
     } catch (err: any) {
       console.error("URL summarizer error:", err);
@@ -98,12 +93,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 🎥 YouTube
   app.post("/api/summarize/youtube", async (req, res) => {
     try {
-      const { url, input } = req.body;
-      const yt = (url || input || "").trim();
-      if (!yt) return res.status(400).json({ message: "YouTube URL required" });
-      const summary = await summarizeText(yt, "youtube");
+      const { url } = req.body;
+      if (!url?.trim()) return res.status(400).json({ message: "YouTube URL is required" });
+      const summary = await summarizeText(url, "youtube");
       res.json({ summary });
     } catch (err: any) {
       console.error("YouTube summarizer error:", err);
@@ -111,41 +106,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-// ---------------- PDF Summarizer ----------------
+  // 📄 PDF
   app.post("/api/summarize/pdf", async (req, res) => {
     try {
       const form = formidable({ keepExtensions: true });
-      form.parse(req, async (err, fields, files: any) => {
+      form.parse(req, async (err, _fields, files: any) => {
         if (err) {
           console.error("Formidable parse error:", err);
           return res.status(400).json({ message: "File upload failed" });
         }
 
         const uploadedFile = files.file;
-        if (!uploadedFile) {
-          return res.status(400).json({ message: "No file uploaded" });
-        }
+        if (!uploadedFile) return res.status(400).json({ message: "No file uploaded" });
 
         const filePath = uploadedFile.filepath || uploadedFile.path;
-        if (!filePath) {
-          return res.status(400).json({ message: "Uploaded file path is undefined" });
-        }
+        if (!filePath) return res.status(400).json({ message: "Uploaded file path missing" });
 
         try {
           const fileBuffer = await fs.promises.readFile(filePath);
           const summary = await summarizeText(fileBuffer, "pdf");
 
-          if (!summary || summary.length < 10) {
+          if (!summary || summary.length < 10)
             return res.status(400).json({ message: "PDF contains no readable text" });
-          }
 
           res.json({ summary });
         } catch (pdfErr: any) {
           console.error("PDF extraction error:", pdfErr);
           res.status(500).json({ message: pdfErr.message || "Failed to extract text from PDF" });
         } finally {
-          // Remove uploaded file
-          fs.unlink(filePath, () => {});
+          fs.unlink(filePath, () => {}); // cleanup
         }
       });
     } catch (err: any) {
@@ -202,7 +191,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/user/login", async (req, res) => {
     try {
       const { username, password } = req.body;
-      if (!username || !password) return res.status(400).json({ message: "Username & password required" });
+      if (!username || !password)
+        return res.status(400).json({ message: "Username & password required" });
 
       const user =
         (await storage.getUserByUsername(username)) ||
@@ -220,12 +210,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ---------------- Article Interactions ----------------
+  // ---------------- Article Likes & Comments ----------------
   app.post("/api/articles/:id/like", authenticateToken, async (req, res) => {
     try {
       const { id } = req.params;
       const userId = req.user.userId;
       const existingLike = await storage.getUserLike(userId, id);
+
       if (existingLike) {
         await storage.deleteLike(userId, id);
         res.json({ liked: false });
