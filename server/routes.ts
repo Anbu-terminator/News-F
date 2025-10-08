@@ -111,29 +111,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ---------------- PDF Summarizer ----------------
+// ---------------- PDF Summarizer ----------------
   app.post("/api/summarize/pdf", async (req, res) => {
     try {
       const form = formidable({ keepExtensions: true });
       form.parse(req, async (err, fields, files: any) => {
-        if (err) return res.status(400).json({ message: "File upload failed" });
+        if (err) {
+          console.error("Formidable parse error:", err);
+          return res.status(400).json({ message: "File upload failed" });
+        }
 
-        const file = files.file;
-        if (!file) return res.status(400).json({ message: "No file uploaded" });
+        const uploadedFile = files.file;
+        if (!uploadedFile) {
+          return res.status(400).json({ message: "No file uploaded" });
+        }
+
+        const filePath = uploadedFile.filepath || uploadedFile.path;
+        if (!filePath) {
+          return res.status(400).json({ message: "Uploaded file path is undefined" });
+        }
 
         try {
-          const fileBuffer = await fs.promises.readFile(file.filepath || file.path);
+          const fileBuffer = await fs.promises.readFile(filePath);
           const summary = await summarizeText(fileBuffer, "pdf");
 
-          if (!summary || summary.length < 10)
+          if (!summary || summary.length < 10) {
             return res.status(400).json({ message: "PDF contains no readable text" });
+          }
 
           res.json({ summary });
         } catch (pdfErr: any) {
           console.error("PDF extraction error:", pdfErr);
           res.status(500).json({ message: pdfErr.message || "Failed to extract text from PDF" });
         } finally {
-          fs.unlink(file.filepath || file.path, () => {});
+          // Remove uploaded file
+          fs.unlink(filePath, () => {});
         }
       });
     } catch (err: any) {
