@@ -5,13 +5,11 @@ import fs from "fs";
 import bcrypt from "bcrypt";
 import formidable from "formidable";
 import fetch from "node-fetch";
-import PDFParser from "pdf2json";
 import { storage } from "./storage";
 import {
   insertUserSchema,
   insertCommentSchema,
   insertLikeSchema,
-  insertBookmarkSchema,
 } from "@shared/schema";
 import { summarizeText, detectFakeNews, chatWithAI } from "./services/openai";
 import { fetchNews } from "./services/newsapi";
@@ -28,28 +26,6 @@ const authenticateToken = (req: any, res: any, next: any) => {
     if (err) return res.status(403).json({ message: "Invalid or expired token" });
     req.user = user;
     next();
-  });
-};
-
-// ---------------- Helper: Extract text from PDF ----------------
-const extractTextFromPDF = (filePath: string): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const pdfParser = new PDFParser();
-    pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError));
-    pdfParser.on("pdfParser_dataReady", (pdfData: any) => {
-      try {
-        const pages = pdfData.formImage?.Pages || [];
-        const text = pages
-          .map((page: any) =>
-            page.Texts.map((t: any) => decodeURIComponent(t.R.map((r: any) => r.T).join(""))).join(" ")
-          )
-          .join("\n\n");
-        resolve(text.trim());
-      } catch (err) {
-        reject(err);
-      }
-    });
-    pdfParser.loadPDF(filePath);
   });
 };
 
@@ -135,21 +111,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ---------------- PDF Summarizer ----------------
   app.post("/api/summarize/pdf", async (req, res) => {
     try {
-      const form = new formidable.IncomingForm({ keepExtensions: true });
+      const form = formidable({ keepExtensions: true });
       form.parse(req, async (err, fields, files: any) => {
         if (err) return res.status(400).json({ message: "File upload failed" });
+
         const file = files.file;
         if (!file) return res.status(400).json({ message: "No file uploaded" });
+
         const filePath = file.filepath || file.path;
 
         try {
-          const extractedText = await extractTextFromPDF(filePath);
-          if (!extractedText || extractedText.length < 30)
+          const fileBuffer = await fs.promises.readFile(filePath);
+          const summary = await summarizeText(fileBuffer, "pdf");
+
+          if (!summary || summary.length < 10)
             return res.status(400).json({ message: "PDF contains no readable text" });
 
-          const summary = await summarizeText(extractedText, "pdf");
           res.json({ summary });
         } catch (pdfErr) {
           console.error("PDF extraction error:", pdfErr);
