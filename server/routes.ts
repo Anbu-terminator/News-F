@@ -16,9 +16,7 @@ import {
 import { summarizeText, detectFakeNews, chatWithAI } from "./services/openai";
 import { fetchNews } from "./services/newsapi";
 
-const JWT_SECRET =
-  process.env.SESSION_SECRET ||
-  "supersecretdefaultkey";
+const JWT_SECRET = process.env.SESSION_SECRET || "supersecretdefaultkey";
 
 // ---------------- Middleware ----------------
 const authenticateToken = (req: any, res: any, next: any) => {
@@ -40,12 +38,10 @@ const extractTextFromPDF = (filePath: string): Promise<string> => {
     pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError));
     pdfParser.on("pdfParser_dataReady", (pdfData: any) => {
       try {
-        const pages = pdfData.formImage.Pages || [];
+        const pages = pdfData.formImage?.Pages || [];
         const text = pages
           .map((page: any) =>
-            page.Texts.map((t: any) =>
-              decodeURIComponent(t.R.map((r: any) => r.T).join(""))
-            ).join(" ")
+            page.Texts.map((t: any) => decodeURIComponent(t.R.map((r: any) => r.T).join(""))).join(" ")
           )
           .join("\n\n");
         resolve(text.trim());
@@ -147,11 +143,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const file = files.file;
         if (!file) return res.status(400).json({ message: "No file uploaded" });
         const filePath = file.filepath || file.path;
-        const extractedText = await extractTextFromPDF(filePath);
-        if (!extractedText || extractedText.length < 30)
-          return res.status(400).json({ message: "PDF contains no readable text" });
-        const summary = await summarizeText(extractedText, "pdf");
-        res.json({ summary });
+
+        try {
+          const extractedText = await extractTextFromPDF(filePath);
+          if (!extractedText || extractedText.length < 30)
+            return res.status(400).json({ message: "PDF contains no readable text" });
+
+          const summary = await summarizeText(extractedText, "pdf");
+          res.json({ summary });
+        } catch (pdfErr) {
+          console.error("PDF extraction error:", pdfErr);
+          res.status(500).json({ message: "Failed to extract text from PDF" });
+        } finally {
+          fs.unlink(filePath, () => {}); // cleanup uploaded file
+        }
       });
     } catch (err: any) {
       console.error("PDF summarizer error:", err);
