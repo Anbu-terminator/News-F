@@ -1,5 +1,6 @@
 import fs from "fs";
 import axios from "axios";
+import pdf from "pdf-parse";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
