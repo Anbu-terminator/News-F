@@ -50,20 +50,19 @@ export default function Summarizer() {
         res = await apiRequest("POST", `/api/summarize/${activeTab}`, body);
       }
 
-      // Check HTTP status first
       if (!res.ok) {
         let errMsg = "Server returned an error";
         try {
           const errData = await res.json();
           errMsg = errData.message || errMsg;
         } catch {
-          // If not JSON, keep generic error
+          // Keep generic error if response not JSON
         }
         throw new Error(errMsg);
       }
 
       const data = await res.json();
-      const s = data.summary ?? data.result ?? "";
+      const s = data.summary ?? "";
       if (s && typeof s === "string") {
         setSummary(s);
         toast({ title: "✅ Summary generated!", description: "Done!" });
