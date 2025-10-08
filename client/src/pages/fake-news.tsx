@@ -12,7 +12,6 @@ import { Shield, AlertTriangle, CheckCircle, Info, Loader2 } from "lucide-react"
 
 interface DetectionResult {
   isReal: boolean;
-  confidence: number;
   reasoning: string;
 }
 
@@ -27,29 +26,26 @@ export default function FakeNews() {
       toast({
         title: "Input required",
         description: "Please enter text or URL to check",
-        variant: "destructive"
+        variant: "destructive",
       });
       return;
     }
 
     setLoading(true);
     try {
-      const response = await apiRequest('POST', '/api/fakecheck', {
-        text: inputText
-      }, false);
-      
+      const response = await apiRequest("POST", "/api/fakecheck", { text: inputText }, false);
       const data = await response.json();
       setResult(data);
-      
+
       toast({
         title: "Analysis complete!",
-        description: `Content analyzed with ${Math.round(data.confidence * 100)}% confidence`
+        description: data.isReal ? "Trusted source found." : "No trusted source found.",
       });
-    } catch (error) {
+    } catch {
       toast({
         title: "Error",
         description: "Failed to analyze content. Please try again.",
-        variant: "destructive"
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -59,26 +55,6 @@ export default function FakeNews() {
   const handleReset = () => {
     setInputText("");
     setResult(null);
-  };
-
-  const getResultColor = (isReal: boolean, confidence: number) => {
-    if (confidence > 0.8) {
-      return isReal ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
-    }
-    return 'text-yellow-600 dark:text-yellow-400';
-  };
-
-  const getResultIcon = (isReal: boolean, confidence: number) => {
-    if (confidence > 0.8) {
-      return isReal ? <CheckCircle className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />;
-    }
-    return <Info className="w-6 h-6" />;
-  };
-
-  const getConfidenceLevel = (confidence: number) => {
-    if (confidence > 0.8) return 'High';
-    if (confidence > 0.6) return 'Medium';
-    return 'Low';
   };
 
   return (
@@ -92,7 +68,7 @@ export default function FakeNews() {
             Fake News Detector
           </h1>
           <p className="text-lg text-muted-foreground">
-            Verify the authenticity of news articles using advanced AI analysis
+            Check if content comes from trusted news sources
           </p>
         </div>
 
@@ -105,98 +81,54 @@ export default function FakeNews() {
               id="content-input"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Paste the article URL or full text for fact-checking..."
+              placeholder="Paste article text or URL to verify..."
               className="min-h-[300px] resize-none mt-2"
-              data-testid="input-fake-detector-text"
             />
           </div>
 
           <div className="flex justify-end space-x-3 mt-6">
-            <Button
-              variant="outline"
-              onClick={handleReset}
-              data-testid="button-reset-fake-detector"
-            >
+            <Button variant="outline" onClick={handleReset}>
               Reset
             </Button>
-            <Button
-              onClick={handleCheck}
-              disabled={loading || !inputText.trim()}
-              data-testid="button-check-authenticity"
-            >
+            <Button onClick={handleCheck} disabled={loading || !inputText.trim()}>
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Analyzing...
                 </>
               ) : (
-                'Check Authenticity'
+                "Check Authenticity"
               )}
             </Button>
           </div>
         </Card>
 
-        <Card className="p-6 bg-muted mb-6">
-          <div className="flex items-start space-x-3">
-            <Info className="w-6 h-6 text-primary mt-1 flex-shrink-0" />
-            <div>
-              <h3 className="font-semibold text-foreground mb-2">How it works</h3>
-              <p className="text-muted-foreground">
-                Our AI analyzes the content against trusted sources and fact-checking databases to determine authenticity.
-                Content from trusted sources like <strong>Thanthi, Polimer, Sun TV, BBC, Reuters, and AP News</strong> is automatically marked as reliable.
-                The system evaluates factors like source credibility, factual accuracy, emotional language vs factual reporting, and consistency with known facts.
-              </p>
-            </div>
-          </div>
-        </Card>
-
         {result && (
-          <Card className="p-6" data-testid="fake-detector-result">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className={`flex items-center space-x-3 ${getResultColor(result.isReal, result.confidence)}`}>
-                  {getResultIcon(result.isReal, result.confidence)}
-                  <span className="text-2xl font-bold">
-                    {result.isReal ? 'Likely Real' : 'Possibly Fake'}
-                  </span>
-                </div>
-                <Badge variant="outline" className="text-lg px-4 py-2">
-                  {getConfidenceLevel(result.confidence)} Confidence ({Math.round(result.confidence * 100)}%)
-                </Badge>
+          <Card className="p-6">
+            <div className="flex items-center justify-between">
+              <div
+                className={`flex items-center space-x-3 ${
+                  result.isReal ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                }`}
+              >
+                {result.isReal ? (
+                  <CheckCircle className="w-6 h-6" />
+                ) : (
+                  <AlertTriangle className="w-6 h-6" />
+                )}
+                <span className="text-2xl font-bold">
+                  {result.isReal ? "Real News" : "Fake News"}
+                </span>
               </div>
-              
-              <Card className="p-4 bg-muted">
-                <h4 className="font-semibold mb-3 text-lg">Analysis:</h4>
-                <p className="text-muted-foreground leading-relaxed">
-                  {result.reasoning}
-                </p>
-              </Card>
-
-              {result.confidence < 0.8 && (
-                <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6">
-                  <div className="flex items-start space-x-3">
-                    <AlertTriangle className="w-6 h-6 text-yellow-600 mt-1 flex-shrink-0" />
-                    <div>
-                      <h4 className="font-semibold text-yellow-800 dark:text-yellow-200 mb-2">
-                        Proceed with Caution
-                      </h4>
-                      <p className="text-yellow-700 dark:text-yellow-300">
-                        The confidence level is moderate. We recommend cross-referencing with multiple trusted sources 
-                        before sharing or acting on this information. Always verify important news through established 
-                        news outlets and fact-checking organizations.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="text-sm text-muted-foreground border-t pt-4">
-                <p>
-                  <strong>Disclaimer:</strong> This AI analysis is for informational purposes only. 
-                  Always verify important information through multiple reliable sources.
-                </p>
-              </div>
+              <Badge variant="outline" className="text-lg px-4 py-2">
+                {result.isReal ? "Trusted Source" : "Unverified Source"}
+              </Badge>
             </div>
+
+            <Card className="p-4 bg-muted mt-4">
+              <h4 className="font-semibold mb-3 text-lg">Details:</h4>
+              <p className="text-muted-foreground leading-relaxed">{result.reasoning}</p>
+            </Card>
           </Card>
         )}
       </div>
