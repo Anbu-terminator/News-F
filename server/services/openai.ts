@@ -1,12 +1,11 @@
 import fs from "fs";
 import axios from "axios";
-import pdf from "pdf-parse";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import OpenAI from "openai";
+import PDFParser from "pdf2json";
 
 // -------------------- CONFIG --------------------
-const PDFCO_API_KEY = "bastoffcial@gmail.com_Q1GTZUlpOeDRke3okhHCexKqfZU0Zw27loiIOEeyhrOA6Eh0MTxKfo8NP8hl2lIr";
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const CHAT_MODEL = "deepseek-ai/DeepSeek-R1:fireworks-ai";
@@ -36,23 +35,26 @@ export function ruleBasedTextSummarizer(text: string): string {
   return summaryIndices.map((i) => sentences[i]).join(". ") + ".";
 }
 
-// -------------------- PDF READER via PDF.co API --------------------
-export async function readPdfContent(pdfBuffer: Buffer): Promise<string> {
-  try {
-    const base64Pdf = pdfBuffer.toString("base64");
-
-    const response = await axios.post(
-      "https://api.pdf.co/v1/pdf/convert/to/text",
-      { file: base64Pdf },
-      { headers: { "x-api-key": PDFCO_API_KEY } }
-    );
-
-    if (!response.data || !response.data.text) return "No readable text found in PDF.";
-    return response.data.text.replace(/\s+/g, " ").trim();
-  } catch (err: any) {
-    console.error("PDF.co read error:", err.response?.data || err.message || err);
-    return "Failed to read PDF via PDF.co.";
-  }
+// -------------------- PDF READER via pdf2json --------------------
+export function extractTextFromPDF(pdfBuffer: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const pdfParser = new PDFParser();
+    pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError));
+    pdfParser.on("pdfParser_dataReady", (pdfData: any) => {
+      try {
+        const pages = pdfData.formImage?.Pages || [];
+        const text = pages
+          .map((page: any) =>
+            page.Texts.map((t: any) => decodeURIComponent(t.R.map((r: any) => r.T).join(""))).join(" ")
+          )
+          .join("\n\n");
+        resolve(text.trim());
+      } catch (err) {
+        reject(err);
+      }
+    });
+    pdfParser.parseBuffer(pdfBuffer);
+  });
 }
 
 // -------------------- SUMMARIZER ENTRY --------------------
@@ -63,16 +65,19 @@ export async function summarizeText(
   try {
     if (type === "text" && typeof input === "string") return ruleBasedTextSummarizer(input);
 
-    if (type === "pdf") {
-      const pdfText = await readPdfContent(input);
-      if (!pdfText || pdfText.trim().length === 0) return "No readable text extracted from the PDF.";
+    if (type === "pdf" && Buffer.isBuffer(input)) {
+      const pdfText = await extractTextFromPDF(input);
+      if (!pdfText || pdfText.trim().length === 0) return "No readable text extracted from PDF.";
       return ruleBasedTextSummarizer(pdfText);
     }
 
     if (type === "link" && typeof input === "string") {
-      // Use external scraping API instead of Puppeteer
-      const response = await axios.get(`https://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY}&url=${encodeURIComponent(input)}`);
-      const htmlText = response.data.replace(/<[^>]*>/g, " ");
+      const response = await axios.get(input);
+      const htmlText = response.data.replace(/<script[^>]*>.*?<\/script>/gs, "")
+                                    .replace(/<style[^>]*>.*?<\/style>/gs, "")
+                                    .replace(/<[^>]+>/g, " ")
+                                    .replace(/\s+/g, " ")
+                                    .trim();
       return ruleBasedTextSummarizer(htmlText);
     }
 
@@ -90,7 +95,7 @@ export async function summarizeText(
 
     return "Unsupported summarization type.";
   } catch (err: any) {
-    console.error("Summarizer entry error:", err.response?.data || err.message || err);
+    console.error("Summarizer error:", err.response?.data || err.message || err);
     return "Summarization failed due to internal error.";
   }
 }
@@ -115,12 +120,12 @@ export async function chatWithAI(message: string, context?: string): Promise<str
   }
 }
 
-// -------------------- FAKE NEWS DETECTION (Simplified) --------------------
+// -------------------- FAKE NEWS DETECTION --------------------
 export async function detectFakeNews(text: string): Promise<{ isReal: boolean; reasoning: string }> {
   const trustedSources = [
     "the hindu","times of india","indian express","hindustan times","ndtv","business standard",
     "mint","economic times","deccan herald","the telegraph india","dna india","outlook india",
-    "livemint","news18","pti","dina thanthi","dinamalar","dinakaran","maalaimalar","puthiya thalaimurai",
+    "livemint","news18","pti","dinamalar","dinakaran","maalaimalar","puthiya thalaimurai",
     "polimer news","sun tv","vikatan","ananda vikatan","malayala manorama","mathrubhumi","eenadu",
     "sakshi","lokmat","gujarat samachar","rajasthan patrika","punjab kesari","bbc","reuters",
     "ap news","associated press","the guardian","cnn","new york times","washington post",
@@ -157,7 +162,7 @@ export async function fetchYouTubeVideos(query: string, maxResults: number = 5):
       thumbnail: item.snippet?.thumbnails?.high?.url || "",
     }));
   } catch (err: any) {
-    console.error("Error fetching YouTube videos:", err?.message || err);
+    console.error("YouTube fetch error:", err?.message || err);
     return [];
   }
 }
