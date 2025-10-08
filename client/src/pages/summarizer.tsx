@@ -19,14 +19,13 @@ export default function Summarizer() {
   const [activeTab, setActiveTab] = useState<"text" | "url" | "pdf" | "youtube">("text");
   const [isDragging, setIsDragging] = useState(false);
   const [pdfUploaded, setPdfUploaded] = useState<File | null>(null);
-  const [pdfDownloadLink, setPdfDownloadLink] = useState<string | null>(null);
   const { toast } = useToast();
 
   const handleSummarize = async () => {
-    if ((!inputText.trim() && activeTab !== "pdf") || (activeTab === "pdf" && !pdfUploaded)) {
+    if ((activeTab === "pdf" && !pdfUploaded) || (activeTab !== "pdf" && !inputText.trim())) {
       toast({
         title: "Input required",
-        description: "Please enter text, a URL, YouTube link, or upload a PDF to summarize.",
+        description: "Please enter text, URL, YouTube link or upload a PDF.",
         variant: "destructive",
       });
       return;
@@ -35,35 +34,32 @@ export default function Summarizer() {
     setLoading(true);
     setSummary("");
     setErrorMsg("");
-    setPdfDownloadLink(null);
 
     try {
+      let body: any = {};
       if (activeTab === "pdf" && pdfUploaded) {
-        // ✅ Only PDF download logic (no summarization)
-        const fileURL = URL.createObjectURL(pdfUploaded);
-        setPdfDownloadLink(fileURL);
-        setSummary("Your uploaded PDF is ready for download below.");
-        toast({ title: "PDF ready", description: "Uploaded PDF available for download." });
+        // convert file to base64
+        const buffer = await pdfUploaded.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString("base64");
+        body = { pdfBase64: base64 };
+      } else if (activeTab === "url" || activeTab === "youtube") {
+        body = { url: inputText.trim() };
+      } else if (activeTab === "text") {
+        body = { text: inputText.trim() };
+      }
+
+      const res = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
+      const data = await res.json();
+      const s = data.summary ?? data.result ?? "";
+      if (s && typeof s === "string") {
+        setSummary(s);
+        toast({ title: "Summary generated!", description: "Here is your summary." });
       } else {
-        // ✅ Keep normal summarization for Text, URL, and YouTube
-        const body: Record<string, any> = {};
-        if (activeTab === "text") body.text = inputText;
-        else if (activeTab === "url" || activeTab === "youtube") body.url = inputText;
-
-        const res = await apiRequest("POST", `/api/summarize/${activeTab}`, body, false);
-        const data = await res.json();
-
-        const summaryText = data?.summary ?? data?.result ?? data?.message ?? "";
-        if (summaryText.trim()) {
-          setSummary(summaryText.trim());
-          toast({ title: "Summary generated!", description: "Content successfully summarized." });
-        } else {
-          throw new Error(data?.error || "Invalid response from server");
-        }
+        throw new Error(data.error || "Invalid server response");
       }
     } catch (err: any) {
       console.error("Summarizer error:", err);
-      setErrorMsg(err?.message || "Failed to generate summary");
+      setErrorMsg(err?.message || "Failed to summarize");
       toast({ title: "Error", description: err?.message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -75,13 +71,12 @@ export default function Summarizer() {
     setSummary("");
     setErrorMsg("");
     setPdfUploaded(null);
-    setPdfDownloadLink(null);
   };
 
   const handlePdfUpload = (file: File) => {
     setPdfUploaded(file);
     setInputText(file.name);
-    toast({ title: "PDF loaded", description: "PDF uploaded successfully" });
+    toast({ title: "PDF loaded", description: "PDF file ready to summarize" });
   };
 
   const handleDrag = (e: DragEvent<HTMLDivElement>, entering: boolean) => {
@@ -95,8 +90,11 @@ export default function Summarizer() {
     e.stopPropagation();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type === "application/pdf") handlePdfUpload(file);
-    else toast({ title: "Invalid file", description: "Upload a valid PDF file", variant: "destructive" });
+    if (file && file.type === "application/pdf") {
+      handlePdfUpload(file);
+    } else {
+      toast({ title: "Invalid file", description: "Please upload a valid PDF", variant: "destructive" });
+    }
   };
 
   return (
@@ -106,21 +104,32 @@ export default function Summarizer() {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold mb-4">AI Article Summarizer</h1>
           <p className="text-lg text-muted-foreground">
-            Summarize text, URLs, and YouTube videos — or upload PDFs for download.
+            Summarize text, URLs, YouTube videos, or PDFs.
           </p>
         </div>
 
         <Card className="p-6">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
             <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="text"><FileText className="w-4 h-4 mr-2" />Text</TabsTrigger>
-              <TabsTrigger value="pdf"><Upload className="w-4 h-4 mr-2" />PDF</TabsTrigger>
-              <TabsTrigger value="url"><Link className="w-4 h-4 mr-2" />URL</TabsTrigger>
-              <TabsTrigger value="youtube"><Youtube className="w-4 h-4 mr-2" />YouTube</TabsTrigger>
+              <TabsTrigger value="text">
+                <FileText className="w-4 h-4 mr-2" />
+                Text
+              </TabsTrigger>
+              <TabsTrigger value="pdf">
+                <Upload className="w-4 h-4 mr-2" />
+                PDF
+              </TabsTrigger>
+              <TabsTrigger value="url">
+                <Link className="w-4 h-4 mr-2" />
+                URL
+              </TabsTrigger>
+              <TabsTrigger value="youtube">
+                <Youtube class1="w-4 h-4 mr-2" />
+                YouTube
+              </TabsTrigger>
             </TabsList>
 
             <div className="mt-6">
-              {/* TEXT TAB */}
               <TabsContent value="text">
                 <Label>Enter text to summarize</Label>
                 <Textarea
@@ -130,7 +139,6 @@ export default function Summarizer() {
                 />
               </TabsContent>
 
-              {/* PDF TAB */}
               <TabsContent value="pdf">
                 <motion.div
                   onDragEnter={(e) => handleDrag(e, true)}
@@ -152,7 +160,7 @@ export default function Summarizer() {
                     <Upload className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
                   )}
                   <h3 className="font-semibold mb-2">
-                    {pdfUploaded ? "PDF Uploaded Successfully!" : "Drag & Drop or Click to Upload PDF"}
+                    {pdfUploaded ? "PDF Uploaded – ready to summarize" : "Drag & Drop or Click to Upload PDF"}
                   </h3>
                   <input
                     id="pdf-upload-input"
@@ -164,9 +172,8 @@ export default function Summarizer() {
                 </motion.div>
               </TabsContent>
 
-              {/* URL TAB */}
               <TabsContent value="url">
-                <Label>Enter article URL</Label>
+                <Label>Enter URL to summarize</Label>
                 <Textarea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
@@ -174,9 +181,8 @@ export default function Summarizer() {
                 />
               </TabsContent>
 
-              {/* YOUTUBE TAB */}
               <TabsContent value="youtube">
-                <Label>Enter YouTube video URL</Label>
+                <Label>Enter YouTube link</Label>
                 <Textarea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
@@ -187,11 +193,13 @@ export default function Summarizer() {
           </Tabs>
 
           <div className="flex justify-end space-x-3 mt-6">
-            <Button variant="outline" onClick={handleReset}>Reset</Button>
-            <Button onClick={handleSummarize} disabled={loading || (!inputText.trim() && !pdfUploaded)}>
+            <Button variant="outline" onClick={handleReset}>
+              Reset
+            </Button>
+            <Button onClick={handleSummarize} disabled={loading}>
               {loading ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Generating...
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Summarizing...
                 </>
               ) : (
                 "Generate Summary"
@@ -203,24 +211,11 @@ export default function Summarizer() {
         {(summary || errorMsg) && (
           <Card className="p-6 mt-6">
             <h2 className="text-xl font-semibold mb-4">Summary:</h2>
-            <div className="bg-muted p-4 rounded-lg space-y-4">
+            <div className="bg-muted p-4 rounded-lg">
               {summary ? (
-                <>
-                  <p className="whitespace-pre-wrap text-muted-foreground">{summary}</p>
-                  {pdfDownloadLink && (
-                    <a
-                      href={pdfDownloadLink}
-                      download={pdfUploaded?.name || "uploaded.pdf"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition"
-                    >
-                      <Download className="w-4 h-4 mr-2" /> Download Uploaded PDF
-                    </a>
-                  )}
-                </>
+                <p className="whitespace-pre-wrap text-muted-foreground">{summary}</p>
               ) : (
-                <p className="whitespace-pre-wrap text-red-500">⚠️ {errorMsg}</p>
+                <p className="text-red-500">⚠️ {errorMsg}</p>
               )}
             </div>
           </Card>
@@ -229,5 +224,4 @@ export default function Summarizer() {
       <Footer />
     </div>
   );
-                     }
-                    
+}
